@@ -14,6 +14,18 @@ const TIMEOUT_MS = Number(process.env.TIMEOUT_MS ?? 10000);
 const CHANCE = Number(process.env.CHANCE ?? 0.05);
 const COOLDOWN_MS = Number(process.env.COOLDOWN_MS ?? 30000);
 
+// Parse high chance roles (format: RoleNameOrID:0.5,AnotherRoleOrID:0.75)
+// Supports both role names and role IDs
+const HIGH_CHANCE_ROLES = new Map();
+if (process.env.HIGH_CHANCE_ROLES) {
+  process.env.HIGH_CHANCE_ROLES.split(',').forEach(pair => {
+    const [roleIdentifier, chance] = pair.split(':').map(s => s.trim());
+    if (roleIdentifier && chance) {
+      HIGH_CHANCE_ROLES.set(roleIdentifier, Number(chance));
+    }
+  });
+}
+
 // Create client with message content intent
 const client = new Client({
   intents: [
@@ -107,8 +119,19 @@ client.on(Events.MessageCreate, async (message) => {
     const last = cooldowns.get(member.id) ?? 0;
     if (Date.now() - last < COOLDOWN_MS) return;
 
+    // Get timeout chance (check if member has a high-chance role)
+    let timeoutChance = CHANCE;
+    for (const [roleIdentifier, chance] of HIGH_CHANCE_ROLES) {
+      // Check by both role name and role ID
+      if (member.roles.cache.some(role => role.name === roleIdentifier || role.id === roleIdentifier)) {
+        timeoutChance = Math.max(timeoutChance, chance); // Use highest chance if multiple roles
+        console.log(`   🎲 Higher chance detected (${roleIdentifier}): ${(chance * 100).toFixed(1)}%`);
+        break;
+      }
+    }
+
     // chance roll
-    if (Math.random() >= CHANCE) return;
+    if (Math.random() >= timeoutChance) return;
 
     // apply timeout
     const durSeconds = Math.round(TIMEOUT_MS / 1000);

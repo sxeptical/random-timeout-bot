@@ -96,14 +96,7 @@ client.on(Events.MessageCreate, async (message) => {
     console.log(`   Target's highest role: ${member.roles.highest.name} (position: ${member.roles.highest.position})`);
     console.log(`   Bot has ModerateMembers: ${botMember.permissions.has('ModerateMembers')}`);
     console.log(`   Bot has Administrator: ${botMember.permissions.has('Administrator')}`);
-    console.log(`   Target has Administrator: ${member.permissions.has('Administrator')}`);
     console.log(`   Target is owner: ${member.guild.ownerId === member.id}`);
-    
-    // Check if target has Administrator permission (Discord won't allow timeout)
-    if (member.permissions.has('Administrator')) {
-      console.log(`   ❌ Cannot timeout: Target has Administrator permission (Discord restriction)`);
-      return;
-    }
     
     if (!canTimeout(botMember, member)) {
       console.log(`   ❌ Cannot timeout: insufficient permissions`);
@@ -124,7 +117,7 @@ client.on(Events.MessageCreate, async (message) => {
       await member.timeout(TIMEOUT_MS, 'Random fun timeout');
       cooldowns.set(member.id, Date.now());
       // reply with ephemeral-ish fun message (public)
-      await message.channel.send(`${member}, 🎲 You got randomly timed out for ${durSeconds} second(s)!`);
+      await message.channel.send(`${member}, Boom! `);
       console.log(`Timed out ${member.user.tag} for ${durSeconds}s in ${message.guild.name}/${message.channel.name}`);
     } catch (err) {
       console.error('Failed to timeout member:', err.message);

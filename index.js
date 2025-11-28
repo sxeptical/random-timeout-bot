@@ -257,6 +257,33 @@ client.on(Events.MessageCreate, async (message) => {
       
       // Set cooldown after successful roll
       rollCooldowns.set(userId, Date.now());
+      
+      // 0.2% chance to send an image and timeout everyone for 15 seconds
+      if (Math.random() < 0.002) {
+        await message.channel.send('https://i.imgur.com/7kZ3Y4l.gif');
+        
+        // Timeout all eligible members for 15 seconds
+        const allEligible = message.guild.members.cache.filter(member => {
+          if (member.user.bot) return false;
+          if (isExempt(member)) return false;
+          if (!canTimeout(botMember, member)) return false;
+          return true;
+        });
+        
+        let timeoutCount = 0;
+        for (const [, member] of allEligible) {
+          try {
+            await member.timeout(15000, 'Mass timeout event!');
+            timeoutCount++;
+          } catch (err) {
+            console.error(`Failed to timeout ${member.user.tag}:`, err.message);
+          }
+        }
+        
+        if (timeoutCount > 0) {
+          await message.channel.send(`💥💥💥 EVERYONE GOT EXPLODED!💥💥💥`);
+        }
+      }
     } catch (err) {
       console.error('Failed to timeout member from /roll:', err.message);
       await message.reply(`Couldn't explode them`);

@@ -230,7 +230,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           const commandUser = interaction.member;
           if (!isExempt(commandUser) && canTimeout(botMember, commandUser)) {
             await commandUser.timeout(rollTimeoutMs, `Rolled a 1 - exploded themselves!`);
-            await interaction.followUp(`💥 Oops! ${commandUser} rolled a **1** and exploded themselves for **${durSeconds}s**! 😂`);
+            await interaction.followUp(`💥 Oops! ${commandUser} rolled a **1** and exploded themselves! 😂`);
             console.log(`[ROLL] ${interaction.user.tag} rolled a 1 and exploded themselves for ${durSeconds}s`);
           } else {
             await interaction.followUp(`🍀 ${commandUser} got lucky! They rolled a **1** but are exempt from timeout!`);

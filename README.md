@@ -4,9 +4,6 @@ A fun Discord bot that randomly times out server members with various interactiv
 
 [![Add to Discord](https://img.shields.io/badge/Add%20to-Discord-7289DA?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/oauth2/authorize?client_id=1443608019010322545&permissions=8&integration_type=0&scope=bot)
 
-## 🔗 Quick Add
-
-**[Click here to add the bot to your server!](https://discord.com/oauth2/authorize?client_id=1443608019010322545&permissions=8&integration_type=0&scope=bot)**
 
 ## ✨ Features
 

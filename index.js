@@ -13,6 +13,7 @@ const WATCH_CHANNELS = process.env.CHANNEL_ALLOW ? process.env.CHANNEL_ALLOW.spl
 const TIMEOUT_MS = Number(process.env.TIMEOUT_MS ?? 10000);
 const CHANCE = Number(process.env.CHANCE ?? 0.05);
 const COOLDOWN_MS = Number(process.env.COOLDOWN_MS ?? 30000);
+const ROLL_COOLDOWN_MS = 3600000; // 1 hour cooldown for /roll command
 
 // Parse high chance roles (format: RoleNameOrID:0.5,AnotherRoleOrID:0.75)
 // Supports both role names and role IDs
@@ -37,8 +38,9 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-// per-user cooldown map
+// per-user cooldown maps
 const cooldowns = new Map();
+const rollCooldowns = new Map();
 
 client.once(Events.ClientReady, () => {
   console.log(`\n✅ Bot is online and ready!`);
@@ -166,6 +168,17 @@ client.on(Events.MessageCreate, async (message) => {
       return;
     }
 
+    // Check cooldown for /roll command
+    const userId = message.author.id;
+    const lastRoll = rollCooldowns.get(userId) ?? 0;
+    const timeSinceLastRoll = Date.now() - lastRoll;
+    
+    if (timeSinceLastRoll < ROLL_COOLDOWN_MS) {
+      const timeRemaining = Math.ceil((ROLL_COOLDOWN_MS - timeSinceLastRoll) / 60000); // Convert to minutes
+      await message.reply(`⏰ You need to wait ${timeRemaining} more minute(s) before rolling again!`);
+      return;
+    }
+
     // Get all non-bot members who aren't exempt (excluding the command user for rolls 2-6)
     const eligibleMembers = message.guild.members.cache.filter(member => {
       if (member.user.bot) return false;
@@ -241,9 +254,12 @@ client.on(Events.MessageCreate, async (message) => {
         await message.channel.send(`💥 ${targetMember} got timed out for **${durSeconds}s**!`);
         console.log(`[ROLL] ${message.author.tag} rolled a ${diceRoll} and timed out ${targetMember.user.tag} for ${durSeconds}s)`);
       }
+      
+      // Set cooldown after successful roll
+      rollCooldowns.set(userId, Date.now());
     } catch (err) {
       console.error('Failed to timeout member from /roll:', err.message);
-      await message.reply(`Couldn't time them out`);
+      await message.reply(`Couldn't explode them`);
     }
   } catch (err) {
     console.error('Error in /roll command:', err);

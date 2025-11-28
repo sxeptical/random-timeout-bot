@@ -214,8 +214,8 @@ client.on(Events.MessageCreate, async (message) => {
           await message.channel.send(`💥💥 ${targetMember} got DOUBLE exploded for **${durSeconds}s**! (Not enough people for 2 timeouts)`);
           console.log(`[ROLL] ${message.author.tag} rolled a 6 and exploded ${targetMember.user.tag} for ${durSeconds}s`);
         } else {
-          // Pick two different random people based on position
-          const firstIndex = 5 % eligibleArray.length; // Position for roll 6 (first person)
+          // Pick two different random people
+          const firstIndex = Math.floor(Math.random() * eligibleArray.length);
           const firstMember = eligibleArray[firstIndex];
           
           // Pick second person (different from first)
@@ -231,16 +231,15 @@ client.on(Events.MessageCreate, async (message) => {
           console.log(`[ROLL] ${message.author.tag} rolled a 6 and exploded ${firstMember.user.tag} and ${secondMember.user.tag} for ${durSeconds}s`);
         }
       }
-      // Rolls 2-5: Timeout one person based on their position
+      // Rolls 2-5: Timeout one random person
       else {
         const eligibleArray = Array.from(eligibleMembers.values());
-        // Use dice roll to determine position (roll 2 = index 1, roll 3 = index 2, etc.)
-        const targetIndex = (diceRoll - 1) % eligibleArray.length;
+        const targetIndex = Math.floor(Math.random() * eligibleArray.length);
         const targetMember = eligibleArray[targetIndex];
         
         await targetMember.timeout(rollTimeoutMs, `Rolled a ${diceRoll} by /roll command`);
-        await message.channel.send(`💥 ${targetMember} got timed out for **${durSeconds}s** (position ${targetIndex + 1})!`);
-        console.log(`[ROLL] ${message.author.tag} rolled a ${diceRoll} and timed out ${targetMember.user.tag} for ${durSeconds}s (position ${targetIndex + 1})`);
+        await message.channel.send(`💥 ${targetMember} got timed out for **${durSeconds}s**!`);
+        console.log(`[ROLL] ${message.author.tag} rolled a ${diceRoll} and timed out ${targetMember.user.tag} for ${durSeconds}s)`);
       }
     } catch (err) {
       console.error('Failed to timeout member from /roll:', err.message);

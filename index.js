@@ -196,7 +196,7 @@ client.on(Events.MessageCreate, async (message) => {
       if (diceRoll === 1) {
         const commandUser = message.member;
         if (!isExempt(commandUser) && canTimeout(botMember, commandUser)) {
-          await commandUser.timeout(rollTimeoutMs, `Rolled a 1 - timed out themselves!`);
+          await commandUser.timeout(rollTimeoutMs, `Rolled a 1 - exploded themselves!`);
           await message.channel.send(`💥 Oops! ${commandUser} rolled a **1** and exploded themselves for **${durSeconds}s**! 😂`);
           console.log(`[ROLL] ${message.author.tag} rolled a 1 and exploded themselves for ${durSeconds}s`);
         } else {
@@ -243,7 +243,7 @@ client.on(Events.MessageCreate, async (message) => {
       }
     } catch (err) {
       console.error('Failed to timeout member from /roll:', err.message);
-      await message.reply(`Failed to apply timeout: ${err.message}`);
+      await message.reply(`Couldn't time them out`);
     }
   } catch (err) {
     console.error('Error in /roll command:', err);

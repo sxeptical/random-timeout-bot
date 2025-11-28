@@ -151,4 +151,57 @@ client.on(Events.MessageCreate, async (message) => {
   }
 });
 
+// /roll command - randomly timeout someone
+client.on(Events.MessageCreate, async (message) => {
+  try {
+    if (message.author.bot) return;
+    if (!message.guild) return;
+    if (!message.content.toLowerCase().startsWith('/roll')) return;
+
+    const botMember = message.guild.members.me;
+    
+    // Check if bot has permissions
+    if (!botMember.permissions.has('ModerateMembers')) {
+      await message.reply('I need the "Moderate Members" permission to use this command!');
+      return;
+    }
+
+    // Get all non-bot members who aren't exempt
+    const eligibleMembers = message.guild.members.cache.filter(member => {
+      if (member.user.bot) return false;
+      if (isExempt(member)) return false;
+      if (!canTimeout(botMember, member)) return false;
+      return true;
+    });
+
+    if (eligibleMembers.size === 0) {
+      await message.reply('🎲 No eligible members to timeout!');
+      return;
+    }
+
+    // Pick a random member
+    const randomMember = eligibleMembers.random();
+    const diceRoll = Math.floor(Math.random() * 6) + 1; // Roll 1-6
+    
+    await message.channel.send(`🎲 ${message.author} rolled the dice... 🎲`);
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Suspense!
+    
+    await message.channel.send(`🎲 The dice shows **${diceRoll}**!`);
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Apply timeout
+    const durSeconds = Math.round(TIMEOUT_MS / 1000);
+    try {
+      await randomMember.timeout(TIMEOUT_MS, `Randomly chosen by /roll command`);
+      await message.channel.send(`💥 ${randomMember} got randomly selected and timed out for ${durSeconds} seconds! Better luck next time! 🎲`);
+      console.log(`[ROLL] ${message.author.tag} rolled and timed out ${randomMember.user.tag} for ${durSeconds}s`);
+    } catch (err) {
+      console.error('Failed to timeout member from /roll:', err.message);
+      await message.reply(`Failed to timeout ${randomMember}. They might be too powerful! 😅`);
+    }
+  } catch (err) {
+    console.error('Error in /roll command:', err);
+  }
+});
+
 client.login(TOKEN);

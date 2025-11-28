@@ -137,7 +137,7 @@ client.on(Events.MessageCreate, async (message) => {
     const durSeconds = Math.round(TIMEOUT_MS / 1000);
     try {
       // requires "Moderate Members" permission for the bot and that bot's role is above target
-      await member.timeout(TIMEOUT_MS, 'Random fun timeout');
+      await member.timeout(TIMEOUT_MS, 'Random timeout');
       cooldowns.set(member.id, Date.now());
       // reply with ephemeral-ish fun message (public)
       await message.channel.send(`${member}, Boom! `);
@@ -166,7 +166,7 @@ client.on(Events.MessageCreate, async (message) => {
       return;
     }
 
-    // Get all non-bot members who aren't exempt
+    // Get all non-bot members who aren't exempt (excluding the command user for rolls 2-6)
     const eligibleMembers = message.guild.members.cache.filter(member => {
       if (member.user.bot) return false;
       if (isExempt(member)) return false;
@@ -179,8 +179,6 @@ client.on(Events.MessageCreate, async (message) => {
       return;
     }
 
-    // Pick a random member
-    const randomMember = eligibleMembers.random();
     const diceRoll = Math.floor(Math.random() * 6) + 1; // Roll 1-6
     
     await message.channel.send(`🎲 ${message.author} rolled the dice... 🎲`);
@@ -189,15 +187,64 @@ client.on(Events.MessageCreate, async (message) => {
     await message.channel.send(`🎲 The dice shows **${diceRoll}**!`);
     await new Promise(resolve => setTimeout(resolve, 500));
     
-    // Apply timeout
-    const durSeconds = Math.round(TIMEOUT_MS / 1000);
+    // Calculate timeout duration based on roll: 1 = 10s, 2 = 20s, ... 6 = 60s
+    const rollTimeoutMs = diceRoll * TIMEOUT_MS;
+    const durSeconds = Math.round(rollTimeoutMs / 1000);
+    
     try {
-      await randomMember.timeout(TIMEOUT_MS, `Randomly chosen by /roll command`);
-      await message.channel.send(`💥 ${randomMember} got exploded randomly! Too bad.`);
-      console.log(`[ROLL] ${message.author.tag} rolled and timed out ${randomMember.user.tag} for ${durSeconds}s`);
+      // Roll 1: Timeout the person who used the command
+      if (diceRoll === 1) {
+        const commandUser = message.member;
+        if (!isExempt(commandUser) && canTimeout(botMember, commandUser)) {
+          await commandUser.timeout(rollTimeoutMs, `Rolled a 1 - timed out themselves!`);
+          await message.channel.send(`💥 Oops! ${commandUser} rolled a **1** and exploded themselves for **${durSeconds}s**! 😂`);
+          console.log(`[ROLL] ${message.author.tag} rolled a 1 and exploded themselves for ${durSeconds}s`);
+        } else {
+          await message.channel.send(`🍀 ${commandUser} got lucky! They rolled a **1** but are exempt from timeout!`);
+        }
+      }
+      // Roll 6: Timeout two people
+      else if (diceRoll === 6) {
+        const eligibleArray = Array.from(eligibleMembers.values());
+        
+        if (eligibleArray.length < 2) {
+          // Only one person available
+          const targetMember = eligibleArray[0];
+          await targetMember.timeout(rollTimeoutMs, `Rolled a 6 by /roll command`);
+          await message.channel.send(`💥💥 ${targetMember} got DOUBLE exploded for **${durSeconds}s**! (Not enough people for 2 timeouts)`);
+          console.log(`[ROLL] ${message.author.tag} rolled a 6 and exploded ${targetMember.user.tag} for ${durSeconds}s`);
+        } else {
+          // Pick two different random people based on position
+          const firstIndex = 5 % eligibleArray.length; // Position for roll 6 (first person)
+          const firstMember = eligibleArray[firstIndex];
+          
+          // Pick second person (different from first)
+          let secondIndex;
+          do {
+            secondIndex = Math.floor(Math.random() * eligibleArray.length);
+          } while (secondIndex === firstIndex);
+          const secondMember = eligibleArray[secondIndex];
+          
+          await firstMember.timeout(rollTimeoutMs, `Rolled a 6 by /roll command (victim 1)`);
+          await secondMember.timeout(rollTimeoutMs, `Rolled a 6 by /roll command (victim 2)`);
+          await message.channel.send(`💥💥 DOUBLE KILL! ${firstMember} and ${secondMember} both got exploded for **${durSeconds}s**!`);
+          console.log(`[ROLL] ${message.author.tag} rolled a 6 and exploded ${firstMember.user.tag} and ${secondMember.user.tag} for ${durSeconds}s`);
+        }
+      }
+      // Rolls 2-5: Timeout one person based on their position
+      else {
+        const eligibleArray = Array.from(eligibleMembers.values());
+        // Use dice roll to determine position (roll 2 = index 1, roll 3 = index 2, etc.)
+        const targetIndex = (diceRoll - 1) % eligibleArray.length;
+        const targetMember = eligibleArray[targetIndex];
+        
+        await targetMember.timeout(rollTimeoutMs, `Rolled a ${diceRoll} by /roll command`);
+        await message.channel.send(`💥 ${targetMember} got timed out for **${durSeconds}s** (position ${targetIndex + 1})!`);
+        console.log(`[ROLL] ${message.author.tag} rolled a ${diceRoll} and timed out ${targetMember.user.tag} for ${durSeconds}s (position ${targetIndex + 1})`);
+      }
     } catch (err) {
       console.error('Failed to timeout member from /roll:', err.message);
-      await message.reply(`Failed to timeout ${randomMember}.`);
+      await message.reply(`Failed to apply timeout: ${err.message}`);
     }
   } catch (err) {
     console.error('Error in /roll command:', err);

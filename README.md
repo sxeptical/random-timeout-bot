@@ -120,9 +120,6 @@ The bot requires these Discord permissions:
 - **Send Messages** - To send responses
 - **Read Messages/View Channels** - To monitor messages
 
-## 📄 License
-
-ISC
 
 ## 🤝 Contributing
 

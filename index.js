@@ -2,7 +2,7 @@
 console.log('Starting bot...');
 import 'dotenv/config';
 console.log('dotenv loaded');
-import { Client, GatewayIntentBits, Partials, Events, Collection, REST, Routes } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, Events, Collection, REST, Routes, MessageFlags } from 'discord.js';
 console.log('discord.js imported');
 
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -184,7 +184,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       
       // Check if bot has permissions
       if (!botMember.permissions.has('ModerateMembers')) {
-        await interaction.reply({ content: 'I need the "Moderate Members" permission to use this command!', ephemeral: true });
+        await interaction.reply({ content: 'I need the "Moderate Members" permission to use this command!', flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -195,7 +195,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       
       if (timeSinceLastRoll < ROLL_COOLDOWN_MS) {
         const timeRemaining = Math.ceil((ROLL_COOLDOWN_MS - timeSinceLastRoll) / 60000); // Convert to minutes
-        await interaction.reply({ content: `⏰ You need to wait ${timeRemaining} more minute(s) before rolling again!`, ephemeral: true });
+        await interaction.reply({ content: `⏰ You need to wait ${timeRemaining} more minute(s) before rolling again!`, flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -208,7 +208,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       });
 
       if (eligibleMembers.size === 0) {
-        await interaction.reply({ content: '🎲 No eligible members to timeout!', ephemeral: true });
+        await interaction.reply({ content: '🎲 No eligible members to timeout!', flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -306,12 +306,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
       } catch (err) {
         console.error('Failed to timeout member from /roll:', err.message);
-        await interaction.followUp({ content: `Couldn't explode them`, ephemeral: true });
+        await interaction.followUp({ content: `Couldn't explode them`, flags: MessageFlags.Ephemeral });
       }
     } catch (err) {
       console.error('Error in /roll command:', err);
       if (!interaction.replied && !interaction.deferred) {
-        await interaction.reply({ content: 'An error occurred!', ephemeral: true });
+        await interaction.reply({ content: 'An error occurred!', flags: MessageFlags.Ephemeral });
       }
     }
   }

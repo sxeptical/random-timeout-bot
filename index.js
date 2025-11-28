@@ -214,7 +214,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       const diceRoll = Math.floor(Math.random() * 6) + 1; // Roll 1-6
       
-      await interaction.reply(`🎲 ${interaction.user} rolled the dice... 🎲`);
+      await interaction.reply(`🎲 Rolling the dice... 🎲`);
       await new Promise(resolve => setTimeout(resolve, 1000)); // Suspense!
       
       await interaction.followUp(`🎲 The dice shows **${diceRoll}**!`);

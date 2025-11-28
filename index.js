@@ -193,11 +193,11 @@ client.on(Events.MessageCreate, async (message) => {
     const durSeconds = Math.round(TIMEOUT_MS / 1000);
     try {
       await randomMember.timeout(TIMEOUT_MS, `Randomly chosen by /roll command`);
-      await message.channel.send(`💥 ${randomMember} got randomly selected and timed out for ${durSeconds} seconds! Better luck next time! 🎲`);
+      await message.channel.send(`💥 ${randomMember} got exploded randomly! Too bad.`);
       console.log(`[ROLL] ${message.author.tag} rolled and timed out ${randomMember.user.tag} for ${durSeconds}s`);
     } catch (err) {
       console.error('Failed to timeout member from /roll:', err.message);
-      await message.reply(`Failed to timeout ${randomMember}. They might be too powerful! 😅`);
+      await message.reply(`Failed to timeout ${randomMember}.`);
     }
   } catch (err) {
     console.error('Error in /roll command:', err);

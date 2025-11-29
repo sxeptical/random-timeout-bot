@@ -180,14 +180,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
   
   if (interaction.commandName === 'roll') {
     try {
-      // Defer reply immediately to prevent timeout
-      await interaction.deferReply();
-      
       const botMember = interaction.guild.members.me;
       
       // Check if bot has permissions
       if (!botMember.permissions.has('ModerateMembers')) {
-        await interaction.editReply({ content: 'I need the "Moderate Members" permission to use this command!' });
+        await interaction.reply({ content: 'I need the "Moderate Members" permission to use this command!', flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -201,10 +198,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
         
         if (timeSinceLastRoll < ROLL_COOLDOWN_MS) {
           const timeRemaining = Math.ceil((ROLL_COOLDOWN_MS - timeSinceLastRoll) / 60000); // Convert to minutes
-          await interaction.editReply({ content: `⏰ You need to wait ${timeRemaining} more minute(s) before rolling again!` });
+          await interaction.reply({ content: `⏰ You need to wait ${timeRemaining} more minute(s) before rolling again!`, flags: MessageFlags.Ephemeral });
           return;
         }
       }
+      
+      // Defer reply after passing all checks
+      await interaction.deferReply();
 
       // Get all non-bot members who aren't exempt
       const eligibleMembers = interaction.guild.members.cache.filter(member => {
@@ -251,7 +251,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             // Only one person available
             const targetMember = eligibleArray[0];
             await targetMember.timeout(rollTimeoutMs, `Rolled a 6 by /roll command`);
-            await interaction.followUp(`💥💥 ${targetMember} got DOUBLE exploded for **${durSeconds}s**! (Not enough people for 2 timeouts)`);
+            await interaction.followUp(`💥💥 ${targetMember} got DOUBLE exploded (Not enough people for 2 timeouts)`);
             console.log(`[ROLL] ${interaction.user.tag} rolled a 6 and exploded ${targetMember.user.tag} for ${durSeconds}s`);
           } else {
             // Pick two different random people

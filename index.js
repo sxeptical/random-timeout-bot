@@ -243,20 +243,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Check cooldown for /roll command (server owner bypasses cooldown)
       const userId = interaction.user.id;
       const isOwner = interaction.guild.ownerId === userId;
-      
+      // Defer reply as soon as possible to avoid double reply errors
+      await interaction.deferReply();
       if (!isOwner) {
         const lastRoll = rollCooldowns.get(userId) ?? 0;
         const timeSinceLastRoll = Date.now() - lastRoll;
-        
         if (timeSinceLastRoll < ROLL_COOLDOWN_MS) {
           const timeRemaining = Math.ceil((ROLL_COOLDOWN_MS - timeSinceLastRoll) / 60000); // Convert to minutes
-          await interaction.reply({ content: `⏰ You need to wait ${timeRemaining} more minute(s) before rolling again!`, flags: MessageFlags.Ephemeral });
+          await interaction.editReply({ content: `⏰ You need to wait ${timeRemaining} more minute(s) before rolling again!` });
           return;
         }
       }
-      
-      // Defer reply after passing all checks
-      await interaction.deferReply();
 
       // Get all non-bot members who aren't exempt
       const eligibleMembers = interaction.guild.members.cache.filter(member => {

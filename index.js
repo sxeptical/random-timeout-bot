@@ -54,11 +54,7 @@ client.once(Events.ClientReady, async () => {
   const commands = [
     {
       name: 'roll',
-      description: 'Roll the dice and randomly explode someone!',
-    },
-    {
-      name: 'nuke',
-      description: 'Explode everyone for 15 seconds and send a nuke image!',
+      description: 'Roll the dice and randomly timeout someone!',
     },
   ];
   
@@ -183,54 +179,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   
   if (interaction.commandName === 'roll') {
-      } else if (interaction.commandName === 'nuke') {
-        try {
-          const botMember = interaction.guild.members.me;
-          const isOwner = interaction.guild.ownerId === interaction.user.id;
-          const isAdmin = interaction.member.permissions.has('Administrator');
-          if (!isOwner && !isAdmin) {
-            await interaction.reply({ content: 'Only administrators or the server owner can use this command!', flags: MessageFlags.Ephemeral });
-            return;
-          }
-          if (!botMember.permissions.has('ModerateMembers')) {
-            await interaction.reply({ content: 'I need the "Moderate Members" permission to use this command!', flags: MessageFlags.Ephemeral });
-            return;
-          }
-          await interaction.deferReply();
-          await interaction.editReply('https://i.imgur.com/7kZ3Y4l.gif');
-          // Explode all eligible members for 15 seconds
-          const allEligible = interaction.guild.members.cache.filter(member => {
-            if (member.user.bot) return false;
-            if (isExempt(member)) return false;
-            if (!canTimeout(botMember, member)) return false;
-            return true;
-          });
-          let explodeCount = 0;
-          for (const [, member] of allEligible) {
-            try {
-              await member.timeout(15000, 'Nuke explosion!');
-              explodeCount++;
-            } catch (err) {
-              console.error(`Failed to explode ${member.user.tag}:`, err.message);
-            }
-          }
-          if (explodeCount > 0) {
-            await interaction.followUp(`💥💥💥 **NUKE LAUNCHED!** Everyone got exploded for 15 seconds! 💥💥💥`);
-          } else {
-            await interaction.followUp({ content: 'No one to explode!', flags: MessageFlags.Ephemeral });
-          }
-        } catch (err) {
-          console.error('Error in /nuke command:', err);
-          try {
-            if (!interaction.replied && !interaction.deferred) {
-              await interaction.reply({ content: '⚠️ An error occurred!', flags: MessageFlags.Ephemeral });
-            } else {
-              await interaction.followUp({ content: '⚠️ An error occurred!', flags: MessageFlags.Ephemeral });
-            }
-          } catch (e) {
-            console.error('Failed to send error message:', e);
-          }
-        }
     try {
       const botMember = interaction.guild.members.me;
       

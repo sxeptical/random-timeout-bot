@@ -180,11 +180,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
   
   if (interaction.commandName === 'roll') {
     try {
+      // Defer reply immediately to prevent timeout
+      await interaction.deferReply();
+      
       const botMember = interaction.guild.members.me;
       
       // Check if bot has permissions
       if (!botMember.permissions.has('ModerateMembers')) {
-        await interaction.reply({ content: 'I need the "Moderate Members" permission to use this command!', flags: MessageFlags.Ephemeral });
+        await interaction.editReply({ content: 'I need the "Moderate Members" permission to use this command!' });
         return;
       }
 
@@ -198,7 +201,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         
         if (timeSinceLastRoll < ROLL_COOLDOWN_MS) {
           const timeRemaining = Math.ceil((ROLL_COOLDOWN_MS - timeSinceLastRoll) / 60000); // Convert to minutes
-          await interaction.reply({ content: `⏰ You need to wait ${timeRemaining} more minute(s) before rolling again!`, flags: MessageFlags.Ephemeral });
+          await interaction.editReply({ content: `⏰ You need to wait ${timeRemaining} more minute(s) before rolling again!` });
           return;
         }
       }
@@ -212,13 +215,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       });
 
       if (eligibleMembers.size === 0) {
-        await interaction.reply({ content: '🎲 No eligible members to timeout!', flags: MessageFlags.Ephemeral });
+        await interaction.editReply({ content: '🎲 No eligible members to timeout!' });
         return;
       }
 
       const diceRoll = Math.floor(Math.random() * 6) + 1; // Roll 1-6
       
-      await interaction.reply(`🎲 Rolling the dice... 🎲`);
+      await interaction.editReply(`🎲 Rolling the dice... 🎲`);
       await new Promise(resolve => setTimeout(resolve, 1500)); // Suspense!
       
       await interaction.editReply(`🎲 The dice shows **${diceRoll}**!`);

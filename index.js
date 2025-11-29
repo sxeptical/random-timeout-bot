@@ -197,7 +197,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             return;
           }
           await interaction.deferReply();
-          await interaction.editReply('https://i.imgur.com/7kZ3Y4l.gif');
+          await interaction.editReply('https://media.discordapp.net/attachments/1423201741931024396/1442538744941907988/image.jpg?ex=692bbb25&is=692a69a5&hm=2b4933660848107d82e2d15eb2522e12d44d30b849a339a9625b7b306202fd7f&=&format=webp');
           // Explode all eligible members for 15 seconds
           const allEligible = interaction.guild.members.cache.filter(member => {
             if (member.user.bot) return false;

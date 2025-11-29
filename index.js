@@ -77,10 +77,10 @@ function isExempt(member) {
   if (!member) return true;
   // exempt bots
   if (member.user?.bot) return true;
+  // exempt administrators (can't be timed out anyway)
+  if (member.permissions?.has('Administrator')) return true;
   // exempt server owner
 //   if (member.guild.ownerId === member.id) return true;
-  // exempt administrators
-//   if (member.permissions?.has('Administrator')) return true;
   // exempt certain roles by name — edit or expand
   const exemptRoleNames = ['Moderator', 'Admin', 'NoTimeout'];
   for (const r of exemptRoleNames) if (member.roles.cache.some(role => role.name === r)) return true;

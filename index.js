@@ -285,8 +285,29 @@ client.on(Events.InteractionCreate, async (interaction) => {
         // Set cooldown after successful roll
         rollCooldowns.set(userId, Date.now());
         
+        // 0.0001% (1 in a million) chance to kick someone
+        if (Math.random() < 0.000001) {
+          const eligibleArray = Array.from(eligibleMembers.values());
+          if (eligibleArray.length > 0) {
+            const unluckyMember = eligibleArray[Math.floor(Math.random() * eligibleArray.length)];
+            try {
+              await unluckyMember.kick('ULTRA RARE EVENT: 1 in a million roll!');
+              await interaction.followUp(`🌟✨💀 **ULTRA RARE EVENT!** 🌟✨💀\n${unluckyMember.user.tag} just hit the 1 IN A MILLION chance and got KICKED from the server! 😱`);
+              console.log(`[ULTRA RARE] ${interaction.user.tag} triggered 1 in a million event - kicked ${unluckyMember.user.tag}`);
+              
+              // Try to DM them the invite after kicking
+              try {
+                await unluckyMember.send(`You just hit the 1 IN A MILLION chance in ${interaction.guild.name}! 😱\nHere's the invite to rejoin: https://discord.gg/P8ZQZRjw29`);
+              } catch (dmErr) {
+                console.log(`Couldn't DM ${unluckyMember.user.tag} - they have DMs disabled or left mutual servers`);
+              }
+            } catch (err) {
+              console.error(`Failed to kick ${unluckyMember.user.tag}:`, err.message);
+            }
+          }
+        }
         // 0.2% chance to send an image and timeout everyone for 15 seconds
-        if (Math.random() < 0.002) {
+        else if (Math.random() < 0.002) {
           await interaction.followUp('https://i.imgur.com/7kZ3Y4l.gif');
           
           // Timeout all eligible members for 15 seconds
@@ -313,7 +334,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
       } catch (err) {
         console.error('Failed to timeout member from /roll:', err.message);
-        await interaction.followUp({ content: `⚠️ Couldn't explode them - they might have higher permissions!`, flags: MessageFlags.Ephemeral });
+        await interaction.followUp({ content: `⚠️ Couldn't explode them`, flags: MessageFlags.Ephemeral });
       }
     } catch (err) {
       console.error('Error in /roll command:', err);

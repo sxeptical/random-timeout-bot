@@ -219,10 +219,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const diceRoll = Math.floor(Math.random() * 6) + 1; // Roll 1-6
       
       await interaction.reply(`🎲 Rolling the dice... 🎲`);
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Suspense!
+      await new Promise(resolve => setTimeout(resolve, 1500)); // Suspense!
       
-      await interaction.followUp(`🎲 The dice shows **${diceRoll}**!`);
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await interaction.editReply(`🎲 The dice shows **${diceRoll}**!`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
       // Calculate timeout duration based on roll: 1 = 10s, 2 = 20s, ... 6 = 60s
       const rollTimeoutMs = diceRoll * TIMEOUT_MS;

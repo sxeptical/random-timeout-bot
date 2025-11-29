@@ -313,15 +313,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
       } catch (err) {
         console.error('Failed to timeout member from /roll:', err.message);
-        await interaction.followUp(`⚠️ Couldn't explode them`);
+        await interaction.followUp({ content: `⚠️ Couldn't explode them - they might have higher permissions!`, flags: MessageFlags.Ephemeral });
       }
     } catch (err) {
       console.error('Error in /roll command:', err);
       try {
         if (!interaction.replied && !interaction.deferred) {
-          await interaction.reply({ content: 'An error occurred!', flags: MessageFlags.Ephemeral });
+          await interaction.reply({ content: '⚠️ An error occurred!', flags: MessageFlags.Ephemeral });
         } else {
-          await interaction.followUp('⚠️ An error occurred!');
+          await interaction.followUp({ content: '⚠️ An error occurred!', flags: MessageFlags.Ephemeral });
         }
       } catch (e) {
         console.error('Failed to send error message:', e);

@@ -80,7 +80,7 @@ function isExempt(member) {
   // exempt administrators (can't be timed out anyway)
   if (member.permissions?.has('Administrator')) return true;
   // exempt server owner
-//   if (member.guild.ownerId === member.id) return true;
+  if (member.guild.ownerId === member.id) return true;
   // exempt certain roles by name — edit or expand
   const exemptRoleNames = ['Moderator', 'Admin', 'NoTimeout'];
   for (const r of exemptRoleNames) if (member.roles.cache.some(role => role.name === r)) return true;
@@ -160,11 +160,11 @@ client.on(Events.MessageCreate, async (message) => {
     const durSeconds = Math.round(TIMEOUT_MS / 1000);
     try {
       // requires "Moderate Members" permission for the bot and that bot's role is above target
-      await member.timeout(TIMEOUT_MS, 'Random timeout');
+      await member.timeout(TIMEOUT_MS, 'Random explosion');
       cooldowns.set(member.id, Date.now());
       // reply with ephemeral-ish fun message (public)
-      await message.channel.send(`${member}, Boom! `);
-      console.log(`Timed out ${member.user.tag} for ${durSeconds}s in ${message.guild.name}/${message.channel.name}`);
+      await message.channel.send(`${member}, 💥 You just exploded for ${durSeconds} second(s)!`);
+      console.log(`Exploded ${member.user.tag} for ${durSeconds}s in ${message.guild.name}/${message.channel.name}`);
     } catch (err) {
       console.error('Failed to timeout member:', err.message);
       // Don't send error message in channel to avoid spam
@@ -215,7 +215,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       });
 
       if (eligibleMembers.size === 0) {
-        await interaction.editReply({ content: '🎲 No eligible members to timeout!' });
+        await interaction.editReply({ content: 'No One to explode!' });
         return;
       }
 
@@ -240,7 +240,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             await interaction.followUp(`💥 Oops! ${commandUser} rolled a **1** and exploded themselves! 😂`);
             console.log(`[ROLL] ${interaction.user.tag} rolled a 1 and exploded themselves for ${durSeconds}s`);
           } else {
-            await interaction.followUp(`🍀 ${commandUser} got lucky! They rolled a **1** but are exempt from timeout!`);
+            await interaction.followUp(`🍀 ${commandUser} got lucky! They rolled a **1** but have immunity!`);
           }
         }
         // Roll 6: Timeout two people
@@ -251,7 +251,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             // Only one person available
             const targetMember = eligibleArray[0];
             await targetMember.timeout(rollTimeoutMs, `Rolled a 6 by /roll command`);
-            await interaction.followUp(`💥💥 ${targetMember} got DOUBLE exploded (Not enough people for 2 timeouts)`);
+            await interaction.followUp(`💥💥 ${targetMember} got DOUBLE exploded (Not enough people for 2 explosions)`);
             console.log(`[ROLL] ${interaction.user.tag} rolled a 6 and exploded ${targetMember.user.tag} for ${durSeconds}s`);
           } else {
             // Pick two different random people
@@ -278,8 +278,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
           const targetMember = eligibleArray[targetIndex];
           
           await targetMember.timeout(rollTimeoutMs, `Rolled a ${diceRoll} by /roll command`);
-          await interaction.followUp(`💥 ${targetMember} got timed out for **${durSeconds}s**!`);
-          console.log(`[ROLL] ${interaction.user.tag} rolled a ${diceRoll} and timed out ${targetMember.user.tag} for ${durSeconds}s)`);
+          await interaction.followUp(`💥 ${targetMember} got exploded for **${durSeconds}s**!`);
+          console.log(`[ROLL] ${interaction.user.tag} rolled a ${diceRoll} and exploded ${targetMember.user.tag} for ${durSeconds}s)`);
         }
         
         // Set cooldown after successful roll
@@ -310,7 +310,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         else if (Math.random() < 0.002) {
           await interaction.followUp('https://i.imgur.com/7kZ3Y4l.gif');
           
-          // Timeout all eligible members for 15 seconds
+          // Explode all eligible members for 15 seconds
           const allEligible = interaction.guild.members.cache.filter(member => {
             if (member.user.bot) return false;
             if (isExempt(member)) return false;
@@ -318,17 +318,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
             return true;
           });
           
-          let timeoutCount = 0;
+          let explodeCount = 0;
           for (const [, member] of allEligible) {
             try {
-              await member.timeout(15000, 'Mass timeout event!');
-              timeoutCount++;
+              await member.timeout(15000, 'Mass explosion event!');
+              explodeCount++;
             } catch (err) {
-              console.error(`Failed to timeout ${member.user.tag}:`, err.message);
+              console.error(`Failed to explode ${member.user.tag}:`, err.message);
             }
           }
           
-          if (timeoutCount > 0) {
+          if (explodeCount > 0) {
             await interaction.followUp(`💥💥💥 EVERYONE GOT EXPLODED!💥💥💥`);
           }
         }

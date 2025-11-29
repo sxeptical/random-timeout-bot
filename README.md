@@ -120,11 +120,6 @@ The bot requires these Discord permissions:
 - **Send Messages** - To send responses
 - **Read Messages/View Channels** - To monitor messages
 
-
-## 🤝 Contributing
-
-Feel free to open issues or submit pull requests!
-
 ## ⚠️ Disclaimer
 
 This bot is meant for fun and should be used responsibly. Make sure your server members are okay with random timeout mechanics before deploying.

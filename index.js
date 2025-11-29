@@ -267,7 +267,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             
             await firstMember.timeout(rollTimeoutMs, `Rolled a 6 by /roll command (victim 1)`);
             await secondMember.timeout(rollTimeoutMs, `Rolled a 6 by /roll command (victim 2)`);
-            await interaction.followUp(`💥💥 DOUBLE KILL! ${firstMember} and ${secondMember} both got exploded for!`);
+            await interaction.followUp(`💥💥 DOUBLE KILL! ${firstMember} and ${secondMember} both got exploded!`);
             console.log(`[ROLL] ${interaction.user.tag} rolled a 6 and exploded ${firstMember.user.tag} and ${secondMember.user.tag}`);
           }
         }

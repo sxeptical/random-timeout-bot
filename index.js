@@ -56,7 +56,21 @@ client.once(Events.ClientReady, async () => {
       name: 'roll',
       description: 'Roll the dice and randomly timeout someone!',
     },
+    {
+      name: 'rollcooldown',
+      description: 'Enable or disable the /roll command cooldown (admin/owner only)',
+      options: [
+        {
+          name: 'enabled',
+          description: 'Enable cooldown? (true/false)',
+          type: 5, // BOOLEAN
+          required: true,
+        },
+      ],
+    },
   ];
+  // Global toggle for /roll cooldown
+  let rollCooldownEnabled = true;
   
   const rest = new REST({ version: '10' }).setToken(TOKEN);
   
@@ -192,10 +206,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const userId = interaction.user.id;
       const isOwner = interaction.guild.ownerId === userId;
       
-      if (!isOwner) {
+      if (rollCooldownEnabled && !isOwner) {
         const lastRoll = rollCooldowns.get(userId) ?? 0;
         const timeSinceLastRoll = Date.now() - lastRoll;
-        
         if (timeSinceLastRoll < ROLL_COOLDOWN_MS) {
           const timeRemaining = Math.ceil((ROLL_COOLDOWN_MS - timeSinceLastRoll) / 60000); // Convert to minutes
           await interaction.reply({ content: `⏰ You need to wait ${timeRemaining} more minute(s) before rolling again!`, flags: MessageFlags.Ephemeral });
@@ -283,7 +296,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
         
         // Set cooldown after successful roll
-        rollCooldowns.set(userId, Date.now());
+        if (rollCooldownEnabled) {
+          rollCooldowns.set(userId, Date.now());
+        }
+          else if (interaction.commandName === 'rollcooldown') {
+            // Only allow server owner or admin to use
+            const isOwner = interaction.guild.ownerId === interaction.user.id;
+            const isAdmin = interaction.member.permissions.has('Administrator');
+            if (!isOwner && !isAdmin) {
+              await interaction.reply({ content: 'Only administrators or the server owner can use this command!', flags: MessageFlags.Ephemeral });
+              return;
+            }
+            const enabled = interaction.options.getBoolean('enabled');
+            rollCooldownEnabled = enabled;
+            await interaction.reply({ content: `/roll cooldown is now **${enabled ? 'ENABLED' : 'DISABLED'}**.`, flags: MessageFlags.Ephemeral });
+          }
         
         // 0.0001% (1 in a million) chance to kick someone
         if (Math.random() < 0.000001) {

@@ -300,35 +300,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (rollCooldownEnabled) {
           rollCooldowns.set(userId, Date.now());
         }
-          else if (interaction.commandName === 'rollcooldown') {
-            try {
-                // Ensure response is deferred immediately
-                await interaction.deferReply();
-
-                // Check permissions
-                const isOwner = interaction.guild.ownerId === interaction.user.id;
-                const isAdmin = interaction.member.permissions.has('Administrator');
-                if (!isOwner && !isAdmin) {
-                    await interaction.editReply({ content: 'You do not have permission to use this!', flags: MessageFlags.Ephemeral });
-                    return;
-                }
-
-                // Update cooldown state
-                const enabled = interaction.options.getBoolean('enabled');
-                rollCooldownEnabled = enabled;
-                console.log(`rollCooldownEnabled set to: ${enabled}`); // Debug logging
-
-                // Respond to user
-                await interaction.editReply({ content: `✅ /roll cooldown is now **${enabled ? 'ENABLED' : 'DISABLED'}**.`, flags: MessageFlags.Ephemeral });
-            } catch (err) {
-                console.error('Error in /rollcooldown command:', err);
-                try {
-                    await interaction.editReply({ content: 'An error occurred while processing your request.', flags: MessageFlags.Ephemeral });
-                } catch (e) {
-                    console.error('Failed to send error message:', e);
-                }
-            }
-          }
         
         // 0.0001% (1 in a million) chance to kick someone
         if (Math.random() < 0.000001) {
@@ -383,6 +354,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     } catch (err) {
       console.error('Error in /roll command:', err);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '⚠️ An error occurred!', flags: MessageFlags.Ephemeral });
+        } else {
+          await interaction.followUp({ content: '⚠️ An error occurred!', flags: MessageFlags.Ephemeral });
+        }
+      } catch (e) {
+        console.error('Failed to send error message:', e);
+      }
+    }
+  }
+  else if (interaction.commandName === 'rollcooldown') {
+    try {
+      // Defer reply immediately so Discord doesn't mark the interaction as unresponded
+      await interaction.deferReply();
+
+      // Only allow server owner or admin to use
+      const isOwner = interaction.guild.ownerId === interaction.user.id;
+      const isAdmin = interaction.member.permissions.has('Administrator');
+      if (!isOwner && !isAdmin) {
+        await interaction.editReply({ content: '❌ Only administrators or the server owner can use this command!', flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const enabled = interaction.options.getBoolean('enabled');
+      rollCooldownEnabled = enabled;
+      console.log(`rollCooldownEnabled set to: ${enabled}`);
+
+      await interaction.editReply({ content: `✅ /roll cooldown is now **${enabled ? 'ENABLED' : 'DISABLED'}**.`, flags: MessageFlags.Ephemeral });
+    } catch (err) {
+      console.error('Error in /rollcooldown command (top-level):', err);
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: '⚠️ An error occurred!', flags: MessageFlags.Ephemeral });

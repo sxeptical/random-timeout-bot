@@ -50,27 +50,28 @@ client.once(Events.ClientReady, async () => {
   console.log(`⏱️  Timeout duration: ${TIMEOUT_MS / 1000}s`);
   console.log(`⏳ Cooldown: ${COOLDOWN_MS / 1000}s\n`);
   
-  // Register slash commands
-  const commands = [
-    {
-      name: 'roll',
-      description: 'Roll the dice and randomly timeout someone!',
-    },
-    {
-      name: 'rollcooldown',
-      description: 'Enable or disable the /roll command cooldown (admin/owner only)',
-      options: [
-        {
-          name: 'enabled',
-          description: 'Enable cooldown? (true/false)',
-          type: 5, // BOOLEAN
-          required: true,
-        },
-      ],
-    },
-  ];
-  // Global toggle for /roll cooldown
-  let rollCooldownEnabled = true;
+// Global toggle for /roll cooldown
+let rollCooldownEnabled = true;
+
+// Register slash commands
+const commands = [
+  {
+    name: 'roll',
+    description: 'Roll the dice and randomly timeout someone!',
+  },
+  {
+    name: 'rollcooldown',
+    description: 'Enable or disable the /roll command cooldown (admin/owner only)',
+    options: [
+      {
+        name: 'enabled',
+        description: 'Enable cooldown? (true/false)',
+        type: 5, // BOOLEAN
+        required: true,
+      },
+    ],
+  },
+];
   
   const rest = new REST({ version: '10' }).setToken(TOKEN);
   

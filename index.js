@@ -302,23 +302,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
           else if (interaction.commandName === 'rollcooldown') {
             try {
-                await interaction.deferReply(); // Ensure response is deferred immediately
+                // Ensure response is deferred immediately
+                await interaction.deferReply();
 
-                // Only allow server owner or admin to use
+                // Check permissions
                 const isOwner = interaction.guild.ownerId === interaction.user.id;
                 const isAdmin = interaction.member.permissions.has('Administrator');
                 if (!isOwner && !isAdmin) {
-                    await interaction.editReply({ content: 'Only administrators or the server owner can use this command!', flags: MessageFlags.Ephemeral });
+                    await interaction.editReply({ content: 'You do not have permission to use this!', flags: MessageFlags.Ephemeral });
                     return;
                 }
 
+                // Update cooldown state
                 const enabled = interaction.options.getBoolean('enabled');
                 rollCooldownEnabled = enabled;
-                await interaction.editReply({ content: `/roll cooldown is now **${enabled ? 'ENABLED' : 'DISABLED'}**.`, flags: MessageFlags.Ephemeral });
+                console.log(`rollCooldownEnabled set to: ${enabled}`); // Debug logging
+
+                // Respond to user
+                await interaction.editReply({ content: `✅ /roll cooldown is now **${enabled ? 'ENABLED' : 'DISABLED'}**.`, flags: MessageFlags.Ephemeral });
             } catch (err) {
                 console.error('Error in /rollcooldown command:', err);
                 try {
-                    await interaction.editReply({ content: '⚠️ An error occurred!', flags: MessageFlags.Ephemeral });
+                    await interaction.editReply({ content: 'An error occurred while processing your request.', flags: MessageFlags.Ephemeral });
                 } catch (e) {
                     console.error('Failed to send error message:', e);
                 }

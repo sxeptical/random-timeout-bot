@@ -42,6 +42,9 @@ const client = new Client({
 const cooldowns = new Map();
 const rollCooldowns = new Map();
 
+// Global toggle for /roll cooldown
+let rollCooldownEnabled = true;
+
 client.once(Events.ClientReady, async () => {
   console.log(`\n✅ Bot is online and ready!`);
   console.log(`🤖 Logged in as ${client.user.tag}`);
@@ -50,9 +53,6 @@ client.once(Events.ClientReady, async () => {
   console.log(`⏱️  Timeout duration: ${TIMEOUT_MS / 1000}s`);
   console.log(`⏳ Cooldown: ${COOLDOWN_MS / 1000}s\n`);
   
-// Global toggle for /roll cooldown
-let rollCooldownEnabled = true;
-
 // Register slash commands
 const commands = [
   {

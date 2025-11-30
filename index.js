@@ -301,16 +301,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
           rollCooldowns.set(userId, Date.now());
         }
           else if (interaction.commandName === 'rollcooldown') {
-            // Only allow server owner or admin to use
-            const isOwner = interaction.guild.ownerId === interaction.user.id;
-            const isAdmin = interaction.member.permissions.has('Administrator');
-            if (!isOwner && !isAdmin) {
-              await interaction.reply({ content: 'Only administrators or the server owner can use this command!', flags: MessageFlags.Ephemeral });
-              return;
+            try {
+                await interaction.deferReply(); // Ensure response is deferred immediately
+
+                // Only allow server owner or admin to use
+                const isOwner = interaction.guild.ownerId === interaction.user.id;
+                const isAdmin = interaction.member.permissions.has('Administrator');
+                if (!isOwner && !isAdmin) {
+                    await interaction.editReply({ content: 'Only administrators or the server owner can use this command!', flags: MessageFlags.Ephemeral });
+                    return;
+                }
+
+                const enabled = interaction.options.getBoolean('enabled');
+                rollCooldownEnabled = enabled;
+                await interaction.editReply({ content: `/roll cooldown is now **${enabled ? 'ENABLED' : 'DISABLED'}**.`, flags: MessageFlags.Ephemeral });
+            } catch (err) {
+                console.error('Error in /rollcooldown command:', err);
+                try {
+                    await interaction.editReply({ content: '⚠️ An error occurred!', flags: MessageFlags.Ephemeral });
+                } catch (e) {
+                    console.error('Failed to send error message:', e);
+                }
             }
-            const enabled = interaction.options.getBoolean('enabled');
-            rollCooldownEnabled = enabled;
-            await interaction.reply({ content: `/roll cooldown is now **${enabled ? 'ENABLED' : 'DISABLED'}**.`, flags: MessageFlags.Ephemeral });
           }
         
         // 0.0001% (1 in a million) chance to kick someone

@@ -75,9 +75,9 @@ const commands = [
     name: 'roll',
     description: 'Roll the dice and randomly timeout someone!',
   },
-  {
-    name: 'rollcooldown',
-    description: 'Enable or disable the /roll command cooldown (admin/owner only)',
+    {
+      name: 'rollcd',
+      description: 'Enable or disable the /roll command cooldown (admin/owner only)',
     options: [
       {
         name: 'enabled',
@@ -401,7 +401,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
   }
-  else if (interaction.commandName === 'rollcooldown') {
+  else if (interaction.commandName === 'rollcd') {
     try {
       // Defer reply immediately so Discord doesn't mark the interaction as unresponded
       await interaction.deferReply();
@@ -420,7 +420,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       await interaction.editReply({ content: `/roll cooldown is now **${enabled ? 'ENABLED' : 'DISABLED'}**.`, flags: MessageFlags.Ephemeral });
     } catch (err) {
-      console.error('Error in /rollcooldown command (top-level):', err);
+      console.error('Error in /rollcd command (top-level):', err);
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: '⚠️ An error occurred!', flags: MessageFlags.Ephemeral });

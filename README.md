@@ -23,9 +23,7 @@ An interactive dice rolling slash command with escalating consequences:
 
 Higher rolls = longer timeout durations (roll × base timeout duration)
 
-## Make the bot for yourself
-
-## 🚀 Setup
+## Make the bot yourself
 
 ### Prerequisites
 - Node.js (v16 or higher)

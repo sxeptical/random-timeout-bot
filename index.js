@@ -45,6 +45,22 @@ const rollCooldowns = new Map();
 // Global toggle for /roll cooldown
 let rollCooldownEnabled = true;
 
+// Explosion leaderboard (in-memory), scoped per guild: Map<guildId, Map<userId, count>>
+const explodedCounts = new Map();
+
+function recordExplosion(member) {
+  try {
+    const userId = member?.id ?? member?.user?.id;
+    const guildId = member?.guild?.id ?? 'global';
+    if (!userId) return;
+
+    if (!explodedCounts.has(guildId)) explodedCounts.set(guildId, new Map());
+    const guildMap = explodedCounts.get(guildId);
+    guildMap.set(userId, (guildMap.get(userId) ?? 0) + 1);
+  } catch (e) {
+    console.error('Failed to record explosion:', e);
+  }
+}
 client.once(Events.ClientReady, async () => {
   console.log(`\n✅ Bot is online and ready!`);
   console.log(`🤖 Logged in as ${client.user.tag}`);
@@ -71,6 +87,18 @@ const commands = [
       },
     ],
   },
+    {
+      name: 'lb',
+      description: 'Show the leaderboard of who got exploded the most',
+      options: [
+        {
+          name: 'count',
+          description: 'Number of top users to show (default 10)',
+          type: 4, // INTEGER
+          required: false,
+        },
+      ],
+    },
 ];
   
   const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -174,12 +202,14 @@ client.on(Events.MessageCreate, async (message) => {
     // apply timeout
     const durSeconds = Math.round(TIMEOUT_MS / 1000);
     try {
-      // requires "Moderate Members" permission for the bot and that bot's role is above target
-      await member.timeout(TIMEOUT_MS, 'Random timeout');
-      cooldowns.set(member.id, Date.now());
-      // reply with ephemeral-ish fun message (public)
-      await message.channel.send(`${member}, Boom! `);
-      console.log(`Timed out ${member.user.tag} for ${durSeconds}s in ${message.guild.name}/${message.channel.name}`);
+    // requires "Moderate Members" permission for the bot and that bot's role is above target
+    await member.timeout(TIMEOUT_MS, 'Random timeout');
+    // record explosion for leaderboard
+    recordExplosion(member);
+    cooldowns.set(member.id, Date.now());
+    // reply with ephemeral-ish fun message (public)
+    await message.channel.send(`${member}, Boom! `);
+    console.log(`Timed out ${member.user.tag} for ${durSeconds}s in ${message.guild.name}/${message.channel.name}`);
     } catch (err) {
       console.error('Failed to timeout member:', err.message);
       // Don't send error message in channel to avoid spam
@@ -249,8 +279,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         // Roll 1: Timeout the person who used the command
         if (diceRoll === 1) {
           const commandUser = interaction.member;
-          if (!isExempt(commandUser) && canTimeout(botMember, commandUser)) {
+            if (!isExempt(commandUser) && canTimeout(botMember, commandUser)) {
             await commandUser.timeout(rollTimeoutMs, `Rolled a 1 - exploded themselves!`);
+            recordExplosion(commandUser);
             await interaction.followUp(`💥 Oops! ${commandUser} rolled a **1** and exploded themselves! 😂`);
             console.log(`[ROLL] ${interaction.user.tag} rolled a 1 and exploded themselves`);
           } else {
@@ -261,10 +292,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         else if (diceRoll === 6) {
           const eligibleArray = Array.from(eligibleMembers.values());
           
-          if (eligibleArray.length < 2) {
+            if (eligibleArray.length < 2) {
             // Only one person available
             const targetMember = eligibleArray[0];
             await targetMember.timeout(rollTimeoutMs, `Rolled a 6 by /roll command`);
+            recordExplosion(targetMember);
             await interaction.followUp(`💥💥 ${targetMember} got DOUBLE exploded (Not enough people for 2 timeouts)`);
             console.log(`[ROLL] ${interaction.user.tag} rolled a 6 and exploded ${targetMember.user.tag}`);
           } else {
@@ -280,7 +312,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const secondMember = eligibleArray[secondIndex];
             
             await firstMember.timeout(rollTimeoutMs, `Rolled a 6 by /roll command (victim 1)`);
+            recordExplosion(firstMember);
             await secondMember.timeout(rollTimeoutMs, `Rolled a 6 by /roll command (victim 2)`);
+            recordExplosion(secondMember);
             await interaction.followUp(`💥💥 DOUBLE KILL! ${firstMember} and ${secondMember} both got exploded!`);
             console.log(`[ROLL] ${interaction.user.tag} rolled a 6 and exploded ${firstMember.user.tag} and ${secondMember.user.tag}`);
           }
@@ -292,6 +326,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           const targetMember = eligibleArray[targetIndex];
           
           await targetMember.timeout(rollTimeoutMs, `Rolled a ${diceRoll} by /roll command`);
+          recordExplosion(targetMember);
           await interaction.followUp(`💥 ${targetMember} got exploded!`);
           console.log(`[ROLL] ${interaction.user.tag} rolled a ${diceRoll} and exploded ${targetMember.user.tag})`);
         }
@@ -338,6 +373,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           for (const [, member] of allEligible) {
             try {
               await member.timeout(15000, 'Mass timeout event!');
+              recordExplosion(member);
               timeoutCount++;
             } catch (err) {
               console.error(`Failed to timeout ${member.user.tag}:`, err.message);
@@ -382,7 +418,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       rollCooldownEnabled = enabled;
       console.log(`rollCooldownEnabled set to: ${enabled}`);
 
-      await interaction.editReply({ content: `✅ /roll cooldown is now **${enabled ? 'ENABLED' : 'DISABLED'}**.`, flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: `/roll cooldown is now **${enabled ? 'ENABLED' : 'DISABLED'}**.`, flags: MessageFlags.Ephemeral });
     } catch (err) {
       console.error('Error in /rollcooldown command (top-level):', err);
       try {
@@ -393,6 +429,52 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
       } catch (e) {
         console.error('Failed to send error message:', e);
+      }
+    }
+  }
+  else if (interaction.commandName === 'lb') {
+    try {
+      await interaction.deferReply();
+      const requested = interaction.options.getInteger('count') ?? 10;
+      const topN = Math.max(1, Math.min(50, requested));
+
+      // Use guild-specific leaderboard
+      const guildId = interaction.guild.id;
+      const guildMap = explodedCounts.get(guildId) ?? new Map();
+      const entries = Array.from(guildMap.entries());
+      entries.sort((a, b) => b[1] - a[1]);
+
+      if (entries.length === 0) {
+        await interaction.editReply({ content: 'No explosions recorded in this server yet.' });
+        return;
+      }
+
+      const slice = entries.slice(0, topN);
+      const lines = [];
+      let rank = 1;
+      for (const [id, cnt] of slice) {
+        let display = `<@${id}>`;
+        try {
+          const member = await interaction.guild.members.fetch(id);
+          display = member.user.tag;
+        } catch (e) {
+          // keep mention fallback
+        }
+        lines.push(`${rank}. ${display} — ${cnt} explosions`);
+        rank++;
+      }
+
+      await interaction.editReply({ content: `**Explosion Leaderboard (top ${slice.length})**\n${lines.join('\n')}` });
+    } catch (err) {
+      console.error('Error in /lb command:', err);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '⚠️ An error occurred!', flags: MessageFlags.Ephemeral });
+        } else {
+          await interaction.followUp({ content: '⚠️ An error occurred!', flags: MessageFlags.Ephemeral });
+        }
+      } catch (e) {
+        console.error('Failed to send error message for /lb:', e);
       }
     }
   }

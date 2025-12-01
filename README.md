@@ -1,4 +1,4 @@
-# 🎲 Random Timeout Bot
+# Chance
 
 A fun Discord bot that randomly times out server members with various interactive features including dice rolling mechanics and surprise mass timeout events!
 
@@ -22,6 +22,8 @@ An interactive dice rolling slash command with escalating consequences:
 - **0.2% Secret Chance**: Mass timeout event - everyone gets timed out for 15 seconds! 💥
 
 Higher rolls = longer timeout durations (roll × base timeout duration)
+
+## Make the bot for yourself
 
 ## 🚀 Setup
 

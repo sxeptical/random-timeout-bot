@@ -23,10 +23,6 @@ An interactive dice rolling slash command with escalating consequences:
 
 Higher rolls = longer timeout durations (roll × base timeout duration)
 
-### ⏰ Cooldown System
-- Standard random timeout: 10 seconds cooldown
-- /roll command: 1 hour cooldown per user
-
 ## 🚀 Setup
 
 ### Prerequisites

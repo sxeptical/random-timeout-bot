@@ -4,6 +4,8 @@ import 'dotenv/config';
 console.log('dotenv loaded');
 import { Client, GatewayIntentBits, Partials, Events, Collection, REST, Routes, MessageFlags } from 'discord.js';
 console.log('discord.js imported');
+import fs from 'fs';
+import path from 'path';
 
 const TOKEN = process.env.DISCORD_TOKEN;
 console.log('TOKEN exists:', !!TOKEN);
@@ -38,7 +40,7 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-// per-user cooldown maps
+// per-user cooldown maph
 const cooldowns = new Map();
 const rollCooldowns = new Map();
 
@@ -48,15 +50,74 @@ let rollCooldownEnabled = true;
 // Explosion leaderboard (in-memory), scoped per guild: Map<guildId, Map<userId, count>>
 const explodedCounts = new Map();
 
+// ---- Persistence: JSON file storage ----
+const DATA_DIR = path.join(process.cwd(), 'data');
+const LB_FILE = path.join(DATA_DIR, 'leaderboard.json');
+const SAVE_DEBOUNCE_MS = 2000; // debounce writes
+let _saveTimer = null;
+
+function ensureDataDir() {
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { /* ignore */ }
+}
+
+function loadLeaderboard() {
+  try {
+    ensureDataDir();
+    if (!fs.existsSync(LB_FILE)) return;
+    const raw = fs.readFileSync(LB_FILE, 'utf8');
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    for (const [guildId, guildObj] of Object.entries(parsed)) {
+      const gmap = new Map(Object.entries(guildObj).map(([k, v]) => [k, Number(v)]));
+      explodedCounts.set(guildId, gmap);
+    }
+    console.log('✅ Loaded leaderboard from', LB_FILE);
+  } catch (e) {
+    console.error('Failed to load leaderboard:', e);
+  }
+}
+
+function saveLeaderboard() {
+  try {
+    ensureDataDir();
+    const obj = {};
+    for (const [guildId, gmap] of explodedCounts.entries()) {
+      obj[guildId] = Object.fromEntries(gmap);
+    }
+    const tmp = LB_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(obj), 'utf8');
+    fs.renameSync(tmp, LB_FILE);
+  } catch (e) {
+    console.error('Failed to save leaderboard:', e);
+  }
+}
+
+function saveLeaderboardDebounced() {
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => {
+    saveLeaderboard();
+    _saveTimer = null;
+  }, SAVE_DEBOUNCE_MS);
+}
+
+// load on startup
+loadLeaderboard();
+
+// save on graceful shutdown
+process.on('SIGINT', () => { saveLeaderboard(); process.exit(); });
+process.on('SIGTERM', () => { saveLeaderboard(); process.exit(); });
+process.on('exit', () => { saveLeaderboard(); });
+
 function recordExplosion(member) {
   try {
     const userId = member?.id ?? member?.user?.id;
     const guildId = member?.guild?.id ?? 'global';
     if (!userId) return;
-
     if (!explodedCounts.has(guildId)) explodedCounts.set(guildId, new Map());
     const guildMap = explodedCounts.get(guildId);
     guildMap.set(userId, (guildMap.get(userId) ?? 0) + 1);
+    // persist to disk (debounced)
+    try { saveLeaderboardDebounced(); } catch (e) { console.error('Save debounce failed:', e); }
   } catch (e) {
     console.error('Failed to record explosion:', e);
   }

@@ -326,6 +326,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Defer reply after passing all checks
       await interaction.deferReply();
 
+      // Fetch guild members to ensure cache is populated
+      try {
+        await interaction.guild.members.fetch();
+      } catch (e) {
+        console.error('Failed to fetch guild members:', e);
+      }
+
       // Get all non-bot members who aren't exempt
       const eligibleMembers = interaction.guild.members.cache.filter(member => {
         if (member.user.bot) return false;
@@ -333,6 +340,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (!canTimeout(botMember, member)) return false;
         return true;
       });
+
+      console.log(`[ROLL DEBUG] Total cached members: ${interaction.guild.members.cache.size}, Eligible: ${eligibleMembers.size}`);
 
       if (eligibleMembers.size === 0) {
         // Refund charge since no one can be exploded

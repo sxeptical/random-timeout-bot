@@ -322,6 +322,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       });
 
       if (eligibleMembers.size === 0) {
+        // Reset cooldown since no one can be exploded
+        if (rollCooldownEnabled && !isOwner) {
+          rollCooldowns.delete(userId);
+        }
         await interaction.editReply({ content: 'No One to explode!' });
         return;
       }

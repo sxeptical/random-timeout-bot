@@ -308,12 +308,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
         
         if (userData) {
           const timeSinceLastRoll = now - userData.lastRoll;
-          const chargesGained = Math.floor(timeSinceLastRoll / ROLL_COOLDOWN_MS);
+          
+          // Progressive charge schedule: 1hr, 1.5hr, 2hr, 2.5hr, 3hr...
+          // Charge thresholds in ms: [3600000, 5400000, 7200000, 9000000, 10800000]
+          let chargesGained = 0;
+          let cumulativeTime = 0;
+          for (let i = 0; i < MAX_ROLL_CHARGES; i++) {
+            const timeForThisCharge = 3600000 + (i * 1800000); // 1hr + (i * 30min)
+            cumulativeTime += timeForThisCharge;
+            if (timeSinceLastRoll >= cumulativeTime) {
+              chargesGained++;
+            } else {
+              break;
+            }
+          }
+          
           availableCharges = Math.min(MAX_ROLL_CHARGES, userData.charges + chargesGained);
         }
         
         if (availableCharges <= 0) {
-          const timeUntilNextCharge = ROLL_COOLDOWN_MS - ((now - userData.lastRoll) % ROLL_COOLDOWN_MS);
+          // Calculate time until next charge
+          const timeSinceLastRoll = now - userData.lastRoll;
+          const currentCharges = userData.charges;
+          const chargesNeeded = MAX_ROLL_CHARGES - currentCharges;
+          
+          // Find which charge threshold we're waiting for
+          let cumulativeTime = 0;
+          for (let i = 0; i < chargesNeeded; i++) {
+            cumulativeTime += 3600000 + (i * 1800000);
+          }
+          
+          const timeUntilNextCharge = cumulativeTime - timeSinceLastRoll;
           const minutesRemaining = Math.ceil(timeUntilNextCharge / 60000);
           await interaction.reply({ content: `⏰ No roll charges available! Next charge in ${minutesRemaining} minute(s). (Max: ${MAX_ROLL_CHARGES} charges)`, flags: MessageFlags.Ephemeral });
           return;

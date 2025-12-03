@@ -363,6 +363,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (member.user.bot) return false;
         if (isExempt(member)) return false;
         if (!canTimeout(botMember, member)) return false;
+        // Only target online/idle/dnd members (not offline)
+        if (!member.presence || member.presence.status === 'offline') return false;
         return true;
       });
 

@@ -306,6 +306,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.reply({ content: `⏰ You need to wait ${timeRemaining} more minute(s) before rolling again!`, flags: MessageFlags.Ephemeral });
           return;
         }
+        // Set cooldown BEFORE deferReply to prevent race condition
+        rollCooldowns.set(userId, Date.now());
       }
       
       // Defer reply after passing all checks
@@ -392,10 +394,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           console.log(`[ROLL] ${interaction.user.tag} rolled a ${diceRoll} and exploded ${targetMember.user.tag})`);
         }
         
-        // Set cooldown after successful roll
-        if (rollCooldownEnabled) {
-          rollCooldowns.set(userId, Date.now());
-        }
         
         // 0.0001% (1 in a million) chance to kick someone
         if (Math.random() < 0.000001) {

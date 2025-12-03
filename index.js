@@ -16,6 +16,7 @@ const TIMEOUT_MS = Number(process.env.TIMEOUT_MS ?? 10000);
 const CHANCE = Number(process.env.CHANCE ?? 0.05);
 const COOLDOWN_MS = Number(process.env.COOLDOWN_MS ?? 30000);
 const ROLL_COOLDOWN_MS = 3600000; // 1 hour cooldown for /roll command
+const MAX_ROLL_CHARGES = 3; // Maximum stacked roll charges
 
 // Parse high chance roles (format: RoleNameOrID:0.5,AnotherRoleOrID:0.75)
 // Supports both role names and role IDs
@@ -40,8 +41,9 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-// per-user cooldown maph
+// per-user cooldown maps
 const cooldowns = new Map();
+// rollCooldowns now stores { lastRoll: timestamp, charges: number }
 const rollCooldowns = new Map();
 
 // Global toggle for /roll cooldown
@@ -299,15 +301,26 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const isOwner = interaction.guild.ownerId === userId;
       
       if (rollCooldownEnabled && !isOwner) {
-        const lastRoll = rollCooldowns.get(userId) ?? 0;
-        const timeSinceLastRoll = Date.now() - lastRoll;
-        if (timeSinceLastRoll < ROLL_COOLDOWN_MS) {
-          const timeRemaining = Math.ceil((ROLL_COOLDOWN_MS - timeSinceLastRoll) / 60000); // Convert to minutes
-          await interaction.reply({ content: `⏰ You need to wait ${timeRemaining} more minute(s) before rolling again!`, flags: MessageFlags.Ephemeral });
+        const now = Date.now();
+        const userData = rollCooldowns.get(userId);
+        
+        let availableCharges = MAX_ROLL_CHARGES;
+        
+        if (userData) {
+          const timeSinceLastRoll = now - userData.lastRoll;
+          const chargesGained = Math.floor(timeSinceLastRoll / ROLL_COOLDOWN_MS);
+          availableCharges = Math.min(MAX_ROLL_CHARGES, userData.charges + chargesGained);
+        }
+        
+        if (availableCharges <= 0) {
+          const timeUntilNextCharge = ROLL_COOLDOWN_MS - ((now - userData.lastRoll) % ROLL_COOLDOWN_MS);
+          const minutesRemaining = Math.ceil(timeUntilNextCharge / 60000);
+          await interaction.reply({ content: `⏰ No roll charges available! Next charge in ${minutesRemaining} minute(s). (Max: ${MAX_ROLL_CHARGES} charges)`, flags: MessageFlags.Ephemeral });
           return;
         }
-        // Set cooldown BEFORE deferReply to prevent race condition
-        rollCooldowns.set(userId, Date.now());
+        
+        // Consume one charge BEFORE deferReply to prevent race condition
+        rollCooldowns.set(userId, { lastRoll: now, charges: availableCharges - 1 });
       }
       
       // Defer reply after passing all checks
@@ -322,9 +335,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
       });
 
       if (eligibleMembers.size === 0) {
-        // Reset cooldown since no one can be exploded
+        // Refund charge since no one can be exploded
         if (rollCooldownEnabled && !isOwner) {
-          rollCooldowns.delete(userId);
+          const userData = rollCooldowns.get(userId);
+          if (userData) {
+            rollCooldowns.set(userId, { lastRoll: userData.lastRoll, charges: Math.min(MAX_ROLL_CHARGES, userData.charges + 1) });
+          }
         }
         await interaction.editReply({ content: 'No One to explode!' });
         return;

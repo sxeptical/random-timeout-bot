@@ -340,7 +340,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           
           const timeUntilNextCharge = cumulativeTime - timeSinceLastRoll;
           const minutesRemaining = Math.ceil(timeUntilNextCharge / 60000);
-          await interaction.reply({ content: `⏰ No roll charges available! Next charge in ${minutesRemaining} minute(s). (Max: ${MAX_ROLL_CHARGES} charges)`, flags: MessageFlags.Ephemeral });
+          await interaction.reply({ content: `⏰ No rolls available! Next rolls in ${minutesRemaining} minute(s).)`, flags: MessageFlags.Ephemeral });
           return;
         }
         

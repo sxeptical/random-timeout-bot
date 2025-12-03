@@ -330,7 +330,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         } else {
           // New user starts with 1 charge
           availableCharges = 1;
+          console.log(`[ROLL COOLDOWN] New user ${userId}: starting with ${availableCharges} charge`);
         }
+        
+        console.log(`[ROLL COOLDOWN] User ${userId} attempting roll with ${availableCharges} charges available`);
         
         if (availableCharges <= 0) {
           // Calculate time until next charge

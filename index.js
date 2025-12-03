@@ -304,7 +304,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const now = Date.now();
         const userData = rollCooldowns.get(userId);
         
-        let availableCharges = MAX_ROLL_CHARGES;
+        let availableCharges = 0;
         
         if (userData) {
           const timeSinceLastRoll = now - userData.lastRoll;
@@ -324,6 +324,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
           }
           
           availableCharges = Math.min(MAX_ROLL_CHARGES, userData.charges + chargesGained);
+        } else {
+          // New user starts with 1 charge
+          availableCharges = 1;
         }
         
         if (availableCharges <= 0) {
@@ -364,7 +367,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (isExempt(member)) return false;
         if (!canTimeout(botMember, member)) return false;
         // Only target online/idle/dnd members (not offline)
-
+        // if (!member.presence || member.presence.status === 'offline') return false;
         return true;
       });
 

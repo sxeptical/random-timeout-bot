@@ -196,8 +196,19 @@ client.once(Events.ClientReady, async () => {
     },
     {
       name: "exp",
-      description: "Manage explosion counts (Admin only)",
+      description: "Manage explosion counts",
       options: [
+        {
+          name: "action",
+          description: "What to do with the amount (default: Add)",
+          type: 3, // STRING
+          required: true,
+          choices: [
+            { name: "Add", value: "add" },
+            { name: "Remove", value: "remove" },
+            { name: "Set", value: "set" },
+          ],
+        },
         {
           name: "user",
           description: "The user to update",
@@ -209,17 +220,6 @@ client.once(Events.ClientReady, async () => {
           description: "Amount to add/remove/set",
           type: 4, // INTEGER
           required: true,
-        },
-        {
-          name: "action",
-          description: "What to do with the amount (default: Add)",
-          type: 3, // STRING
-          required: false,
-          choices: [
-            { name: "Add", value: "add" },
-            { name: "Remove", value: "remove" },
-            { name: "Set", value: "set" },
-          ],
         },
       ],
     },

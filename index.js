@@ -166,62 +166,27 @@ const commands = [
       name: 'exp',
       description: 'Manage explosion counts (Admin only)',
       options: [
+        {[      
+          name: 'action',
+          description: 'What to do with the amount (default: Add)',
+          type: 3, // STRING
+          required: false,
+          choices: [
+            { name: 'Add', value: 'add' },
+            { name: 'Remove', value: 'remove' },
+            { name: 'Set', value: 'set' },
+          ],},
         {
-          name: 'add',
-          description: 'Add explosions to a user',
-          type: 1, // SUB_COMMAND
-          options: [
-            {
-              name: 'user',
-              description: 'The user to update',
-              type: 6, // USER
-              required: true,
-            },
-            {
-              name: 'amount',
-              description: 'Amount to add',
-              type: 4, // INTEGER
-              required: true,
-            },
-          ],
+          name: 'user',
+          description: 'The user to update',
+          type: 6, // USER
+          required: true,
         },
         {
-          name: 'remove',
-          description: 'Remove explosions from a user',
-          type: 1, // SUB_COMMAND
-          options: [
-            {
-              name: 'user',
-              description: 'The user to update',
-              type: 6, // USER
-              required: true,
-            },
-            {
-              name: 'amount',
-              description: 'Amount to remove',
-              type: 4, // INTEGER
-              required: true,
-            },
-          ],
-        },
-        {
-          name: 'set',
-          description: 'Set a user\'s explosion count directly',
-          type: 1, // SUB_COMMAND
-          options: [
-            {
-              name: 'user',
-              description: 'The user to update',
-              type: 6, // USER
-              required: true,
-            },
-            {
-              name: 'amount',
-              description: 'The exact amount to set',
-              type: 4, // INTEGER
-              required: true,
-            },
-          ],
+          name: 'amount',
+          description: 'Amount to add/remove/set',
+          type: 4, // INTEGER
+          required: true,
         },
       ],
     },
@@ -683,9 +648,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
 
-      const subCommand = interaction.options.getSubcommand();
       const targetUser = interaction.options.getUser('user');
       const amount = interaction.options.getInteger('amount');
+      const action = interaction.options.getString('action') ?? 'add';
       const guildId = interaction.guild.id;
 
       if (!explodedCounts.has(guildId)) {
@@ -697,13 +662,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       let newCount = currentCount;
       let actionText = '';
 
-      if (subCommand === 'add') {
+      if (action === 'add') {
         newCount = currentCount + amount;
         actionText = `added ${amount} to`;
-      } else if (subCommand === 'remove') {
+      } else if (action === 'remove') {
         newCount = Math.max(0, currentCount - amount);
         actionText = `removed ${amount} from`;
-      } else if (subCommand === 'set') {
+      } else if (action === 'set') {
         newCount = Math.max(0, amount);
         actionText = `set to ${amount} for`;
       }
@@ -712,7 +677,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       saveLeaderboardDebounced();
 
       await interaction.editReply({ content: `✅ Successfully ${actionText} **${targetUser.tag}**. New total: **${newCount}** explosions.` });
-      console.log(`[EXP] ${interaction.user.tag} (${subCommand}) ${amount} for ${targetUser.tag}. New total: ${newCount}`);
+      console.log(`[EXP] ${interaction.user.tag} (${action}) ${amount} for ${targetUser.tag}. New total: ${newCount}`);
 
     } catch (err) {
       console.error('Error in /exp command:', err);

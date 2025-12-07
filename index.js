@@ -162,6 +162,24 @@ const commands = [
         },
       ],
     },
+    {
+      name: 'exp',
+      description: 'Give explosions to a user (Admin only)',
+      options: [
+        {
+          name: 'user',
+          description: 'The user to give explosions to',
+          type: 6, // USER
+          required: true,
+        },
+        {
+          name: 'amount',
+          description: 'Amount of explosions to give (can be negative)',
+          type: 4, // INTEGER
+          required: true,
+        },
+      ],
+    },
 ];
   
   const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -605,6 +623,47 @@ client.on(Events.InteractionCreate, async (interaction) => {
       } catch (e) {
         console.error('Failed to send error message for /lb:', e);
       }
+    }
+  }
+  else if (interaction.commandName === 'exp') {
+    try {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+      // Permission check: Admin or Owner only
+      const isOwner = interaction.guild.ownerId === interaction.user.id;
+      const isAdmin = interaction.member.permissions.has('Administrator');
+      if (!isOwner && !isAdmin) {
+        await interaction.editReply({ content: '❌ You function is restricted to Administrators.' });
+        return;
+      }
+
+      const targetUser = interaction.options.getUser('user');
+      const amount = interaction.options.getInteger('amount');
+      const guildId = interaction.guild.id;
+
+      if (!explodedCounts.has(guildId)) {
+        explodedCounts.set(guildId, new Map());
+      }
+      const guildMap = explodedCounts.get(guildId);
+      
+      const currentCount = guildMap.get(targetUser.id) ?? 0;
+      const newCount = Math.max(0, currentCount + amount); // Prevent negative counts? or allow? Let's treat 0 as floor for now.
+      
+      guildMap.set(targetUser.id, newCount);
+      saveLeaderboardDebounced();
+
+      await interaction.editReply({ content: `✅ **${targetUser.tag}** now has **${newCount}** explosions (was ${currentCount}, added ${amount}).` });
+      console.log(`[EXP] ${interaction.user.tag} gave ${amount} explosions to ${targetUser.tag}. New total: ${newCount}`);
+
+    } catch (err) {
+      console.error('Error in /exp command:', err);
+      try {
+           if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '⚠️ An error occurred!', flags: MessageFlags.Ephemeral });
+        } else {
+          await interaction.followUp({ content: '⚠️ An error occurred!', flags: MessageFlags.Ephemeral });
+        }
+      } catch (e) { console.error('Failed to send error for /exp:', e); }
     }
   }
 });

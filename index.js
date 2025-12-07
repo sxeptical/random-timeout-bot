@@ -164,19 +164,64 @@ const commands = [
     },
     {
       name: 'exp',
-      description: 'Give explosions to a user (Admin only)',
+      description: 'Manage explosion counts (Admin only)',
       options: [
         {
-          name: 'user',
-          description: 'The user to give explosions to',
-          type: 6, // USER
-          required: true,
+          name: 'add',
+          description: 'Add explosions to a user',
+          type: 1, // SUB_COMMAND
+          options: [
+            {
+              name: 'user',
+              description: 'The user to update',
+              type: 6, // USER
+              required: true,
+            },
+            {
+              name: 'amount',
+              description: 'Amount to add',
+              type: 4, // INTEGER
+              required: true,
+            },
+          ],
         },
         {
-          name: 'amount',
-          description: 'Amount of explosions to give (can be negative)',
-          type: 4, // INTEGER
-          required: true,
+          name: 'remove',
+          description: 'Remove explosions from a user',
+          type: 1, // SUB_COMMAND
+          options: [
+            {
+              name: 'user',
+              description: 'The user to update',
+              type: 6, // USER
+              required: true,
+            },
+            {
+              name: 'amount',
+              description: 'Amount to remove',
+              type: 4, // INTEGER
+              required: true,
+            },
+          ],
+        },
+        {
+          name: 'set',
+          description: 'Set a user\'s explosion count directly',
+          type: 1, // SUB_COMMAND
+          options: [
+            {
+              name: 'user',
+              description: 'The user to update',
+              type: 6, // USER
+              required: true,
+            },
+            {
+              name: 'amount',
+              description: 'The exact amount to set',
+              type: 4, // INTEGER
+              required: true,
+            },
+          ],
         },
       ],
     },
@@ -507,6 +552,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         // 0.2% chance to send an image and timeout everyone for 15 seconds
         else if (Math.random() < 0.002) {
           await interaction.followUp('https://media.discordapp.net/attachments/1423201741931024396/1442538744941907988/image.jpg?ex=692bbb25&is=692a69a5&hm=2b4933660848107d82e2d15eb2522e12d44d30b849a339a9625b7b306202fd7f&=&format=webp');
+          await interaction.followUp(`${interaction.user.tag} launched a nuke and exploded everyone!`);
           
           // Timeout all eligible members for 15 seconds
           const allEligible = interaction.guild.members.cache.filter(member => {
@@ -514,7 +560,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             if (isExempt(member)) return false;
             if (!canTimeout(botMember, member)) return false;
             return true;
-          });
+          });               
           
           let timeoutCount = 0;
           for (const [, member] of allEligible) {
@@ -633,10 +679,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const isOwner = interaction.guild.ownerId === interaction.user.id;
       const isAdmin = interaction.member.permissions.has('Administrator');
       if (!isOwner && !isAdmin) {
-        await interaction.editReply({ content: '❌ You function is restricted to Administrators.' });
+        await interaction.editReply({ content: 'Only admins can use this command.' });
         return;
       }
 
+      const subCommand = interaction.options.getSubcommand();
       const targetUser = interaction.options.getUser('user');
       const amount = interaction.options.getInteger('amount');
       const guildId = interaction.guild.id;
@@ -647,13 +694,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const guildMap = explodedCounts.get(guildId);
       
       const currentCount = guildMap.get(targetUser.id) ?? 0;
-      const newCount = Math.max(0, currentCount + amount); // Prevent negative counts? or allow? Let's treat 0 as floor for now.
-      
+      let newCount = currentCount;
+      let actionText = '';
+
+      if (subCommand === 'add') {
+        newCount = currentCount + amount;
+        actionText = `added ${amount} to`;
+      } else if (subCommand === 'remove') {
+        newCount = Math.max(0, currentCount - amount);
+        actionText = `removed ${amount} from`;
+      } else if (subCommand === 'set') {
+        newCount = Math.max(0, amount);
+        actionText = `set to ${amount} for`;
+      }
+
       guildMap.set(targetUser.id, newCount);
       saveLeaderboardDebounced();
 
-      await interaction.editReply({ content: `✅ **${targetUser.tag}** now has **${newCount}** explosions (was ${currentCount}, added ${amount}).` });
-      console.log(`[EXP] ${interaction.user.tag} gave ${amount} explosions to ${targetUser.tag}. New total: ${newCount}`);
+      await interaction.editReply({ content: `✅ Successfully ${actionText} **${targetUser.tag}**. New total: **${newCount}** explosions.` });
+      console.log(`[EXP] ${interaction.user.tag} (${subCommand}) ${amount} for ${targetUser.tag}. New total: ${newCount}`);
 
     } catch (err) {
       console.error('Error in /exp command:', err);

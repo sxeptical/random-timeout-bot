@@ -1,4 +1,3 @@
-// index.js
 console.log("Starting bot...");
 import "dotenv/config";
 console.log("dotenv loaded");
@@ -204,9 +203,9 @@ client.once(Events.ClientReady, async () => {
           type: 3, // STRING
           required: true,
           choices: [
-            { name: "Add", value: "add" },
-            { name: "Remove", value: "remove" },
-            { name: "Set", value: "set" },
+            { name: "add", value: "add" },
+            { name: "remove", value: "remove" },
+            { name: "set", value: "set" },
           ],
         },
         {

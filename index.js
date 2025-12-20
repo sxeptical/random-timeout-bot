@@ -21,8 +21,8 @@ if (!TOKEN) throw new Error("DISCORD_TOKEN missing in .env");
 
 const WATCH_CHANNELS = process.env.CHANNEL_ALLOW
   ? process.env.CHANNEL_ALLOW.split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
+    .map((s) => s.trim())
+    .filter(Boolean)
   : null;
 const TIMEOUT_MS = Number(process.env.TIMEOUT_MS ?? 10000);
 const CHANCE = Number(process.env.CHANCE ?? 0.05);
@@ -195,13 +195,13 @@ client.once(Events.ClientReady, async () => {
     },
     {
       name: "exp",
-      description: "Manage explosion counts",
+      description: "View your explosion count, or manage counts (admin only)",
       options: [
         {
           name: "action",
-          description: "What to do with the amount (default: Add)",
+          description: "What to do with the amount (admin only)",
           type: 3, // STRING
-          required: true,
+          required: false,
           choices: [
             { name: "add", value: "add" },
             { name: "remove", value: "remove" },
@@ -210,15 +210,15 @@ client.once(Events.ClientReady, async () => {
         },
         {
           name: "user",
-          description: "The user to update",
+          description: "The user to update (admin only)",
           type: 6, // USER
-          required: true,
+          required: false,
         },
         {
           name: "amount",
-          description: "Amount to add/remove/set",
+          description: "Amount to add/remove/set (admin only)",
           type: 4, // INTEGER
-          required: true,
+          required: false,
         },
       ],
     },
@@ -414,8 +414,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           // Debug log
           console.log(
-            `[ROLL COOLDOWN] User ${userId}: charges=${
-              userData.charges
+            `[ROLL COOLDOWN] User ${userId}: charges=${userData.charges
             }, timeSince=${Math.floor(
               timeSinceLastRoll / 1000
             )}s, gained=${chargesGained}, available=${availableCharges}`
@@ -728,9 +727,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       console.log(`rollCooldownEnabled set to: ${enabled}`);
 
       await interaction.editReply({
-        content: `/roll cooldown is now **${
-          enabled ? "ENABLED" : "DISABLED"
-        }**.`,
+        content: `/roll cooldown is now **${enabled ? "ENABLED" : "DISABLED"
+          }**.`,
         flags: MessageFlags.Ephemeral,
       });
     } catch (err) {
@@ -812,20 +810,38 @@ client.on(Events.InteractionCreate, async (interaction) => {
     try {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-      // Permission check: Admin or Owner only
-      const isOwner = interaction.guild.ownerId === interaction.user.id;
-      const isAdmin = interaction.member.permissions.has("Administrator");
-      if (!isOwner && !isAdmin) {
+      const targetUser = interaction.options.getUser("user");
+      const amount = interaction.options.getInteger("amount");
+      const action = interaction.options.getString("action");
+      const guildId = interaction.guild.id;
+
+      // If no arguments provided, show the user's own explosion count
+      if (!action && !targetUser && amount === null) {
+        const guildMap = explodedCounts.get(guildId) ?? new Map();
+        const userCount = guildMap.get(interaction.user.id) ?? 0;
         await interaction.editReply({
-          content: "Only admins can use this command.",
+          content: `💥 You have been exploded **${userCount}** time${userCount === 1 ? "" : "s"}!`,
         });
         return;
       }
 
-      const targetUser = interaction.options.getUser("user");
-      const amount = interaction.options.getInteger("amount");
-      const action = interaction.options.getString("action") ?? "add";
-      const guildId = interaction.guild.id;
+      // For management actions, require admin permissions
+      const isOwner = interaction.guild.ownerId === interaction.user.id;
+      const isAdmin = interaction.member.permissions.has("Administrator");
+      if (!isOwner && !isAdmin) {
+        await interaction.editReply({
+          content: "❌ Only admins can manage explosion counts. Use `/exp` without arguments to view your own count.",
+        });
+        return;
+      }
+
+      // Validate that all required fields are present for management
+      if (!action || !targetUser || amount === null) {
+        await interaction.editReply({
+          content: "❌ To manage explosion counts, you must provide action, user, and amount.",
+        });
+        return;
+      }
 
       if (!explodedCounts.has(guildId)) {
         explodedCounts.set(guildId, new Map());

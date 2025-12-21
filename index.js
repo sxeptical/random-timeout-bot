@@ -29,6 +29,7 @@ const CHANCE = Number(process.env.CHANCE ?? 0.05);
 const COOLDOWN_MS = Number(process.env.COOLDOWN_MS ?? 30000);
 const ROLL_COOLDOWN_MS = 3600000; // 1 hour cooldown for /roll command
 const MAX_ROLL_CHARGES = 3; // Maximum stacked roll charges
+const ROLL_BANNED_ROLE = "1444727845065588837"; // Role banned from /roll with tripled explosion chance
 
 // Parse high chance roles (format: RoleNameOrID:0.5,AnotherRoleOrID:0.75)
 // Supports both role names and role IDs
@@ -320,6 +321,13 @@ client.on(Events.MessageCreate, async (message) => {
 
     // Get timeout chance (check if member has a high-chance role)
     let timeoutChance = CHANCE;
+    
+    // Triple explosion chance for banned role
+    if (member.roles.cache.has(ROLL_BANNED_ROLE)) {
+      timeoutChance = Math.min(1, CHANCE * 3); // Triple chance, cap at 100%
+      console.log(`   🎯 Banned role detected: tripled chance to ${(timeoutChance * 100).toFixed(1)}%`);
+    }
+    
     for (const [roleIdentifier, chance] of HIGH_CHANCE_ROLES) {
       // Check by both role name and role ID
       if (
@@ -383,6 +391,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Check cooldown for /roll command (server owner bypasses cooldown)
       const userId = interaction.user.id;
       const isOwner = interaction.guild.ownerId === userId;
+
+      // Block banned user from using /roll
+      if (interaction.member.roles.cache.has(ROLL_BANNED_ROLE)) {
+        await interaction.reply({
+          content: "❌ You are banned from using /roll!",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
 
       if (rollCooldownEnabled && !isOwner) {
         const now = Date.now();

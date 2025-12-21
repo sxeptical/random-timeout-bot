@@ -808,7 +808,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   } else if (interaction.commandName === "exp") {
     try {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await interaction.deferReply();
 
       const targetUser = interaction.options.getUser("user");
       const amount = interaction.options.getInteger("amount");
@@ -830,7 +830,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const isAdmin = interaction.member.permissions.has("Administrator");
       if (!isOwner && !isAdmin) {
         await interaction.editReply({
-          content: "❌ Only admins can manage explosion counts. Use `/exp` without arguments to view your own count.",
+          content: "You don't have permission to manage this!",
         });
         return;
       }
@@ -838,7 +838,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Validate that all required fields are present for management
       if (!action || !targetUser || amount === null) {
         await interaction.editReply({
-          content: "❌ To manage explosion counts, you must provide action, user, and amount.",
+          content: "You must provide an action, user, and amount",
         });
         return;
       }

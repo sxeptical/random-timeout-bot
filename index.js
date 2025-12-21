@@ -815,13 +815,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const action = interaction.options.getString("action");
       const guildId = interaction.guild.id;
 
-      // If no arguments provided, show the user's own explosion count
-      if (!action && !targetUser && amount === null) {
+      // If no action provided, show explosion count (own or specified user)
+      if (!action && amount === null) {
         const guildMap = explodedCounts.get(guildId) ?? new Map();
-        const userCount = guildMap.get(interaction.user.id) ?? 0;
-        await interaction.editReply({
-          content: `💥 You have been exploded **${userCount}** time${userCount === 1 ? "" : "s"}!`,
-        });
+        const viewUser = targetUser ?? interaction.user;
+        const userCount = guildMap.get(viewUser.id) ?? 0;
+
+        if (targetUser) {
+          // Viewing another user's count
+          await interaction.editReply({
+            content: `💥 **${targetUser.tag}** has been exploded **${userCount}** time${userCount === 1 ? "" : "s"}!`,
+          });
+        } else {
+          // Viewing own count
+          await interaction.editReply({
+            content: `💥 You have been exploded **${userCount}** time${userCount === 1 ? "" : "s"}!`,
+          });
+        }
         return;
       }
 

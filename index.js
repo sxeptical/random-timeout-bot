@@ -223,6 +223,10 @@ client.once(Events.ClientReady, async () => {
         },
       ],
     },
+    {
+      name: "spin",
+      description: "Spin the wheel! 50/50 chance for 1 week admin or 1 week timeout (5 spins/month)",
+    },
   ];
 
   const rest = new REST({ version: "10" }).setToken(TOKEN);

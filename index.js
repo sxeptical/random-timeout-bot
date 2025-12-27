@@ -10,6 +10,9 @@ import {
   REST,
   Routes,
   MessageFlags,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
 } from "discord.js";
 console.log("discord.js imported");
 import fs from "fs";
@@ -70,6 +73,20 @@ const DATA_DIR = path.join(process.cwd(), "data");
 const LB_FILE = path.join(DATA_DIR, "leaderboard.json");
 const SAVE_DEBOUNCE_MS = 2000; // debounce writes
 let _saveTimer = null;
+let _spinSaveTimer = null;
+
+// Spin Wheel Constants
+const SPIN_FILE = path.join(DATA_DIR, "spin.json");
+const SPIN_ADMIN_ROLE_NAME = "Spin Winner"; // Role name for spin winners
+const MAX_SPINS_PER_MONTH = 5; // Max 5 people can spin per month
+const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
+
+// Spin data: Map<guildId, { month: "YYYY-MM", users: [{ id, timestamp, result }] }>
+const spinData = new Map();
+
+// Active spin sessions (for double-or-nothing): Map<`${guildId}-${userId}`, { expires, stage }>
+const activeSpinSessions = new Map();
 
 function ensureDataDir() {
   try {
@@ -121,20 +138,84 @@ function saveLeaderboardDebounced() {
   }, SAVE_DEBOUNCE_MS);
 }
 
+// ---- Spin Data Persistence ----
+function loadSpinData() {
+  try {
+    ensureDataDir();
+    if (!fs.existsSync(SPIN_FILE)) return;
+    const raw = fs.readFileSync(SPIN_FILE, "utf8");
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    for (const [guildId, data] of Object.entries(parsed)) {
+      spinData.set(guildId, data);
+    }
+    console.log("✅ Loaded spin data from", SPIN_FILE);
+  } catch (e) {
+    console.error("Failed to load spin data:", e);
+  }
+}
+
+function saveSpinData() {
+  try {
+    ensureDataDir();
+    const obj = {};
+    for (const [guildId, data] of spinData.entries()) {
+      obj[guildId] = data;
+    }
+    const tmp = SPIN_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(obj), "utf8");
+    fs.renameSync(tmp, SPIN_FILE);
+  } catch (e) {
+    console.error("Failed to save spin data:", e);
+  }
+}
+
+function saveSpinDataDebounced() {
+  if (_spinSaveTimer) clearTimeout(_spinSaveTimer);
+  _spinSaveTimer = setTimeout(() => {
+    saveSpinData();
+    _spinSaveTimer = null;
+  }, SAVE_DEBOUNCE_MS);
+}
+
+// Helper: Get current month string (YYYY-MM)
+function getCurrentMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+// Helper: Get or initialize guild spin data for current month
+function getGuildSpinData(guildId) {
+  const currentMonth = getCurrentMonth();
+  let guildData = spinData.get(guildId);
+
+  // Reset if month changed
+  if (!guildData || guildData.month !== currentMonth) {
+    guildData = { month: currentMonth, users: [] };
+    spinData.set(guildId, guildData);
+  }
+
+  return guildData;
+}
+
 // load on startup
 loadLeaderboard();
+loadSpinData();
 
 // save on graceful shutdown
 process.on("SIGINT", () => {
   saveLeaderboard();
+  saveSpinData();
   process.exit();
 });
 process.on("SIGTERM", () => {
   saveLeaderboard();
+  saveSpinData();
   process.exit();
 });
 process.on("exit", () => {
   saveLeaderboard();
+  saveSpinData();
 });
 
 function recordExplosion(member) {

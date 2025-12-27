@@ -321,13 +321,13 @@ client.on(Events.MessageCreate, async (message) => {
 
     // Get timeout chance (check if member has a high-chance role)
     let timeoutChance = CHANCE;
-    
+
     // Triple explosion chance for banned role
     if (member.roles.cache.has(ROLL_BANNED_ROLE)) {
       timeoutChance = Math.min(1, CHANCE * 3); // Triple chance, cap at 100%
       console.log(`   🎯 Banned role detected: tripled chance to ${(timeoutChance * 100).toFixed(1)}%`);
     }
-    
+
     for (const [roleIdentifier, chance] of HIGH_CHANCE_ROLES) {
       // Check by both role name and role ID
       if (
@@ -915,6 +915,276 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
       } catch (e) {
         console.error("Failed to send error for /exp:", e);
+      }
+    }
+  } else if (interaction.commandName === "spin") {
+    // ============= /spin command =============
+    try {
+      const guildId = interaction.guild.id;
+      const userId = interaction.user.id;
+      const guildData = getGuildSpinData(guildId);
+
+      // Check if this user has already spun this month
+      const userAlreadySpun = guildData.users.some((u) => u.id === userId);
+      if (userAlreadySpun) {
+        await interaction.reply({
+          content: `🎰 You've already spun the wheel this month! Wait until next month to spin again.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      // Check if 5 people have already spun this month
+      if (guildData.users.length >= MAX_SPINS_PER_MONTH) {
+        await interaction.reply({
+          content: `🎰 The wheel has already been spun ${MAX_SPINS_PER_MONTH} times this month! Wait until next month.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      await interaction.deferReply();
+
+      // Spinning animation
+      const spinFrames = ["🎰 Spinning...", "🎰 Spinning..", "🎰 Spinning.", "🎰 Spinning..."];
+      for (let i = 0; i < 4; i++) {
+        await interaction.editReply(spinFrames[i % spinFrames.length]);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+
+      // 50/50 result
+      const won = Math.random() < 0.5;
+      const result = won ? "admin" : "timeout";
+
+      // Record the spin
+      guildData.users.push({
+        id: userId,
+        timestamp: Date.now(),
+        result: result,
+      });
+      saveSpinDataDebounced();
+
+      if (won) {
+        // Winner gets admin role!
+        try {
+          // Find or create the spin winner role
+          let spinRole = interaction.guild.roles.cache.find(
+            (r) => r.name === SPIN_ADMIN_ROLE_NAME
+          );
+
+          if (!spinRole) {
+            // Create the role if it doesn't exist
+            spinRole = await interaction.guild.roles.create({
+              name: SPIN_ADMIN_ROLE_NAME,
+              permissions: ["Administrator"],
+              reason: "Spin wheel winner role",
+            });
+            console.log(`[SPIN] Created "${SPIN_ADMIN_ROLE_NAME}" role in ${interaction.guild.name}`);
+          }
+
+          // Give the role to the winner
+          await interaction.member.roles.add(spinRole, "Won the spin wheel for 1 week");
+
+          // Schedule role removal after 1 week
+          setTimeout(async () => {
+            try {
+              const member = await interaction.guild.members.fetch(userId);
+              if (member.roles.cache.has(spinRole.id)) {
+                await member.roles.remove(spinRole, "Spin wheel admin period expired (1 week)");
+                console.log(`[SPIN] Removed admin role from ${member.user.tag} after 1 week`);
+              }
+            } catch (e) {
+              console.error("[SPIN] Failed to remove role after timeout:", e);
+            }
+          }, ONE_WEEK_MS);
+
+          // Create double-or-nothing button
+          const sessionKey = `${guildId}-${userId}`;
+          activeSpinSessions.set(sessionKey, {
+            expires: Date.now() + 60000, // 1 minute to decide
+            stage: 1,
+          });
+
+          const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`spin_double_${guildId}_${userId}`)
+              .setLabel("🎲 Double or Nothing! (2 weeks)")
+              .setStyle(ButtonStyle.Danger),
+            new ButtonBuilder()
+              .setCustomId(`spin_keep_${guildId}_${userId}`)
+              .setLabel("✅ Keep 1 Week Admin")
+              .setStyle(ButtonStyle.Success)
+          );
+
+          await interaction.editReply({
+            content: `🎉 **WINNER!** 🎉\n\n${interaction.user} won the spin and gets **1 week of Admin**!\n\n🎲 **Double or Nothing?** Spin again for a chance at **2 weeks Admin** - but if you lose, you get **2 weeks timeout** instead!\n\n⏰ You have 60 seconds to decide...`,
+            components: [row],
+          });
+
+          // Clear the session after 60 seconds
+          setTimeout(async () => {
+            const session = activeSpinSessions.get(sessionKey);
+            if (session && session.stage === 1) {
+              activeSpinSessions.delete(sessionKey);
+              try {
+                await interaction.editReply({
+                  content: `🎉 **WINNER!** 🎉\n\n${interaction.user} won the spin and gets **1 week of Admin**! (Time expired - keeping 1 week)`,
+                  components: [],
+                });
+              } catch (e) {
+                // Interaction may have expired
+              }
+            }
+          }, 60000);
+
+          console.log(`[SPIN] ${interaction.user.tag} WON - gave 1 week admin`);
+        } catch (err) {
+          console.error("[SPIN] Error giving admin role:", err);
+          await interaction.editReply({
+            content: `🎉 You won! But I couldn't give you the admin role (missing permissions?).`,
+          });
+        }
+      } else {
+        // Loser gets 1 week timeout
+        try {
+          await interaction.member.timeout(ONE_WEEK_MS, "Lost the spin wheel - 1 week timeout");
+          await interaction.editReply({
+            content: `💀 **LOST!** 💀\n\n${interaction.user} spun the wheel and lost! Enjoy your **1 week timeout**! 😈`,
+          });
+          console.log(`[SPIN] ${interaction.user.tag} LOST - 1 week timeout`);
+        } catch (err) {
+          console.error("[SPIN] Error applying timeout:", err);
+          await interaction.editReply({
+            content: `💀 You lost! But I couldn't timeout you (you might be immune).`,
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Error in /spin command:", err);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({
+            content: "⚠️ An error occurred!",
+            flags: MessageFlags.Ephemeral,
+          });
+        } else {
+          await interaction.followUp({
+            content: "⚠️ An error occurred!",
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+      } catch (e) {
+        console.error("Failed to send error for /spin:", e);
+      }
+    }
+  }
+});
+
+// Handle button interactions for spin double-or-nothing
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isButton()) return;
+
+  // Handle spin buttons
+  if (interaction.customId.startsWith("spin_double_") || interaction.customId.startsWith("spin_keep_")) {
+    const parts = interaction.customId.split("_");
+    const action = parts[1]; // "double" or "keep"
+    const guildId = parts[2];
+    const targetUserId = parts[3];
+
+    // Only the original user can click the button
+    if (interaction.user.id !== targetUserId) {
+      await interaction.reply({
+        content: "❌ This isn't your spin!",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const sessionKey = `${guildId}-${targetUserId}`;
+    const session = activeSpinSessions.get(sessionKey);
+
+    if (!session || session.stage !== 1) {
+      await interaction.reply({
+        content: "❌ This spin session has expired!",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    // Mark session as used
+    activeSpinSessions.delete(sessionKey);
+
+    if (action === "keep") {
+      // User chose to keep 1 week admin
+      await interaction.update({
+        content: `🎉 **WINNER!** 🎉\n\n${interaction.user} chose to keep their **1 week of Admin**! Smart choice! 🧠`,
+        components: [],
+      });
+      console.log(`[SPIN] ${interaction.user.tag} chose to keep 1 week admin`);
+    } else if (action === "double") {
+      // User chose double or nothing - 50/50 again!
+      await interaction.update({
+        content: `🎲 **DOUBLE OR NOTHING!** 🎲\n\n${interaction.user} is gambling it all...`,
+        components: [],
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      const doubleWon = Math.random() < 0.5;
+
+      if (doubleWon) {
+        // Won double - extend to 2 weeks admin
+        try {
+          // Find the spin role
+          const spinRole = interaction.guild.roles.cache.find(
+            (r) => r.name === SPIN_ADMIN_ROLE_NAME
+          );
+
+          if (spinRole) {
+            // Cancel the 1-week removal and schedule 2-week removal instead
+            setTimeout(async () => {
+              try {
+                const member = await interaction.guild.members.fetch(targetUserId);
+                if (member.roles.cache.has(spinRole.id)) {
+                  await member.roles.remove(spinRole, "Spin wheel admin period expired (2 weeks)");
+                  console.log(`[SPIN] Removed admin role from ${member.user.tag} after 2 weeks`);
+                }
+              } catch (e) {
+                console.error("[SPIN] Failed to remove role after 2-week timeout:", e);
+              }
+            }, TWO_WEEKS_MS);
+          }
+
+          await interaction.editReply({
+            content: `🎉🎉 **JACKPOT!** 🎉🎉\n\n${interaction.user} went double or nothing and **WON**! They now have **2 WEEKS of Admin**! 🏆`,
+          });
+          console.log(`[SPIN] ${interaction.user.tag} WON double or nothing - 2 weeks admin`);
+        } catch (err) {
+          console.error("[SPIN] Error extending admin:", err);
+        }
+      } else {
+        // Lost double - remove admin and apply 2 week timeout
+        try {
+          const spinRole = interaction.guild.roles.cache.find(
+            (r) => r.name === SPIN_ADMIN_ROLE_NAME
+          );
+
+          if (spinRole && interaction.member.roles.cache.has(spinRole.id)) {
+            await interaction.member.roles.remove(spinRole, "Lost double or nothing");
+          }
+
+          await interaction.member.timeout(TWO_WEEKS_MS, "Lost double or nothing - 2 week timeout");
+
+          await interaction.editReply({
+            content: `💀💀 **BUSTED!** 💀💀\n\n${interaction.user} went double or nothing and **LOST EVERYTHING**! Enjoy your **2 WEEKS TIMEOUT**! 😈😈`,
+          });
+          console.log(`[SPIN] ${interaction.user.tag} LOST double or nothing - 2 weeks timeout`);
+        } catch (err) {
+          console.error("[SPIN] Error applying double loss:", err);
+          await interaction.editReply({
+            content: `💀 You lost double or nothing! But I couldn't timeout you (you might be immune).`,
+          });
+        }
       }
     }
   }

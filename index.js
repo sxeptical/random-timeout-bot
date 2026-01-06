@@ -873,44 +873,42 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       const slice = entries.slice(0, topN);
-      const lines = [];
+      const rows = [];
       let rank = 1;
 
-      // Medal emojis for top 3
-      const medals = ["🥇", "🥈", "🥉"];
-
-      for (const [id, cnt] of slice) {
-        let display = `<@${id}>`;
+      // Find the longest display name for padding
+      const displayNames = [];
+      for (const [id] of slice) {
+        let display = `User ${id.slice(-4)}`;
         try {
           const member = await interaction.guild.members.fetch(id);
           display = member.displayName;
         } catch (e) {
-          // keep mention fallback
+          // keep fallback
         }
+        displayNames.push(display);
+      }
+      const maxNameLen = Math.max(4, ...displayNames.map(n => n.length));
+      const maxCountLen = Math.max(5, ...slice.map(([, cnt]) => cnt.toString().length));
 
-        // Format based on rank
-        let prefix;
-        if (rank <= 3) {
-          prefix = medals[rank - 1];
-        } else {
-          prefix = `\`${rank.toString().padStart(2, " ")}.\``;
-        }
-
-        // Add fire emojis for high counts
-        let suffix = "";
-        if (cnt >= 100) suffix = " 🔥🔥🔥";
-        else if (cnt >= 50) suffix = " 🔥🔥";
-        else if (cnt >= 25) suffix = " 🔥";
-
-        lines.push(`${prefix} **${display}** — ${cnt} 💥${suffix}`);
+      // Build table rows
+      for (let i = 0; i < slice.length; i++) {
+        const [, cnt] = slice[i];
+        const display = displayNames[i].padEnd(maxNameLen);
+        const countStr = cnt.toString().padStart(maxCountLen);
+        rows.push(`| ${(rank).toString().padStart(2)} | ${display} | ${countStr} |`);
         rank++;
       }
 
       // Calculate total explosions
       const totalExplosions = entries.reduce((sum, [, cnt]) => sum + cnt, 0);
 
+      // Build the table
+      const header = `| #  | ${"Name".padEnd(maxNameLen)} | ${"Count".padStart(maxCountLen)} |`;
+      const divider = `|----|${"-".repeat(maxNameLen + 2)}|${"-".repeat(maxCountLen + 2)}|`;
+
       await interaction.editReply({
-        content: `## 💣 Explosion Leaderboard 💣\n\n${lines.join("\n")}\n\n━━━━━━━━━━━━━━━━━━━━\n📊 **Total Explosions:** ${totalExplosions} | 👥 **Players:** ${entries.length}`,
+        content: `**Explosion Leaderboard**\n\`\`\`\n${header}\n${divider}\n${rows.join("\n")}\n\`\`\`\nTotal: ${totalExplosions} explosions from ${entries.length} players`,
       });
     } catch (err) {
       console.error("Error in /lb command:", err);

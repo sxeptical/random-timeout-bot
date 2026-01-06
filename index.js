@@ -332,6 +332,8 @@ function isExempt(member) {
   if (member.permissions?.has("Administrator")) return true;
   // exempt server owner
   if (member.guild.ownerId === member.id) return true;
+  // exempt users who are currently timed out (immunity until untimedout)
+  if (member.communicationDisabledUntil && member.communicationDisabledUntil > new Date()) return true;
   // exempt certain roles by name — edit or expand
   const exemptRoleNames = ["Moderator", "Admin", "NoTimeout"];
   for (const r of exemptRoleNames)

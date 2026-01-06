@@ -875,22 +875,42 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const slice = entries.slice(0, topN);
       const lines = [];
       let rank = 1;
+
+      // Medal emojis for top 3
+      const medals = ["🥇", "🥈", "🥉"];
+
       for (const [id, cnt] of slice) {
         let display = `<@${id}>`;
         try {
           const member = await interaction.guild.members.fetch(id);
-          display = member.user.tag;
+          display = member.displayName;
         } catch (e) {
           // keep mention fallback
         }
-        lines.push(`${rank}. ${display} — ${cnt} explosions`);
+
+        // Format based on rank
+        let prefix;
+        if (rank <= 3) {
+          prefix = medals[rank - 1];
+        } else {
+          prefix = `\`${rank.toString().padStart(2, " ")}.\``;
+        }
+
+        // Add fire emojis for high counts
+        let suffix = "";
+        if (cnt >= 100) suffix = " 🔥🔥🔥";
+        else if (cnt >= 50) suffix = " 🔥🔥";
+        else if (cnt >= 25) suffix = " 🔥";
+
+        lines.push(`${prefix} **${display}** — ${cnt} 💥${suffix}`);
         rank++;
       }
 
+      // Calculate total explosions
+      const totalExplosions = entries.reduce((sum, [, cnt]) => sum + cnt, 0);
+
       await interaction.editReply({
-        content: `**Explosion Leaderboard (top ${slice.length})**\n${lines.join(
-          "\n"
-        )}`,
+        content: `## 💣 Explosion Leaderboard 💣\n\n${lines.join("\n")}\n\n━━━━━━━━━━━━━━━━━━━━\n📊 **Total Explosions:** ${totalExplosions} | 👥 **Players:** ${entries.length}`,
       });
     } catch (err) {
       console.error("Error in /lb command:", err);

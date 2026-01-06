@@ -13,6 +13,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  EmbedBuilder,
 } from "discord.js";
 console.log("discord.js imported");
 import fs from "fs";
@@ -87,6 +88,123 @@ const spinData = new Map();
 
 // Active spin sessions (for double-or-nothing): Map<`${guildId}-${userId}`, { expires, stage }>
 const activeSpinSessions = new Map();
+
+// Blackjack game sessions: Map<`${guildId}-${userId}`, { bet, playerHand, dealerHand, deck, status }>
+const blackjackGames = new Map();
+
+// Blackjack helper functions
+const CARD_SUITS = ["♠", "♥", "♦", "♣"];
+const CARD_VALUES = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+
+function createDeck() {
+  const deck = [];
+  for (const suit of CARD_SUITS) {
+    for (const value of CARD_VALUES) {
+      deck.push({ suit, value });
+    }
+  }
+  // Shuffle the deck
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck;
+}
+
+function getCardValue(card) {
+  if (["J", "Q", "K"].includes(card.value)) return 10;
+  if (card.value === "A") return 11;
+  return parseInt(card.value);
+}
+
+function calculateHand(hand) {
+  let total = 0;
+  let aces = 0;
+  for (const card of hand) {
+    total += getCardValue(card);
+    if (card.value === "A") aces++;
+  }
+  // Adjust for aces if busting
+  while (total > 21 && aces > 0) {
+    total -= 10;
+    aces--;
+  }
+  return total;
+}
+
+function formatCard(card) {
+  const redSuits = ["♥", "♦"];
+  return `${card.value}${card.suit}`;
+}
+
+function formatHand(hand, hideSecond = false) {
+  if (hideSecond && hand.length >= 2) {
+    return `${formatCard(hand[0])} | ??`;
+  }
+  return hand.map(formatCard).join(" | ");
+}
+
+async function handleDealerTurn(interaction, game, guildMap, userId, guildId, sessionKey) {
+  // Dealer draws until 17 or higher
+  while (calculateHand(game.dealerHand) < 17) {
+    game.dealerHand.push(game.deck.pop());
+  }
+
+  const playerTotal = calculateHand(game.playerHand);
+  const dealerTotal = calculateHand(game.dealerHand);
+  const userExplosions = guildMap.get(userId) ?? 0;
+
+  blackjackGames.delete(sessionKey);
+
+  let resultTitle, resultDesc, resultColor, resultText;
+
+  if (dealerTotal > 21) {
+    // Dealer busted - player wins
+    const winnings = game.bet;
+    guildMap.set(userId, userExplosions + winnings);
+    resultTitle = "🃏 Blackjack - YOU WIN!";
+    resultDesc = "Dealer busted!";
+    resultText = `You won **${winnings}** explosions!`;
+    resultColor = 0x00ff00;
+  } else if (playerTotal > dealerTotal) {
+    // Player wins
+    const winnings = game.bet;
+    guildMap.set(userId, userExplosions + winnings);
+    resultTitle = "🃏 Blackjack - YOU WIN!";
+    resultDesc = "You beat the dealer!";
+    resultText = `You won **${winnings}** explosions!`;
+    resultColor = 0x00ff00;
+  } else if (dealerTotal > playerTotal) {
+    // Dealer wins
+    const newTotal = Math.max(0, userExplosions - game.bet);
+    guildMap.set(userId, newTotal);
+    resultTitle = "🃏 Blackjack - YOU LOSE!";
+    resultDesc = "Dealer wins!";
+    resultText = `You lost **${game.bet}** explosions!`;
+    resultColor = 0xff0000;
+  } else {
+    // Push - tie
+    resultTitle = "🃏 Blackjack - PUSH!";
+    resultDesc = "It's a tie!";
+    resultText = `Bet returned: **${game.bet}** explosions`;
+    resultColor = 0xffff00;
+  }
+
+  if (!explodedCounts.has(guildId)) explodedCounts.set(guildId, guildMap);
+  saveLeaderboardDebounced();
+
+  const embed = new EmbedBuilder()
+    .setTitle(resultTitle)
+    .setDescription(resultDesc)
+    .addFields(
+      { name: "Your Hand", value: `${formatHand(game.playerHand)} (${playerTotal})`, inline: true },
+      { name: "Dealer's Hand", value: `${formatHand(game.dealerHand)} (${dealerTotal})`, inline: true },
+      { name: "Result", value: resultText, inline: false }
+    )
+    .setColor(resultColor);
+
+  await interaction.update({ embeds: [embed], components: [] });
+}
 
 function ensureDataDir() {
   try {
@@ -268,8 +386,8 @@ client.once(Events.ClientReady, async () => {
       description: "Show the leaderboard of who got exploded the most",
       options: [
         {
-          name: "count",
-          description: "Number of top users to show (default 10)",
+          name: "page",
+          description: "Page number to view (default 1)",
           type: 4, // INTEGER
           required: false,
         },
@@ -307,6 +425,18 @@ client.once(Events.ClientReady, async () => {
     {
       name: "spin",
       description: "Spin the wheel! 50/50 chance for 1 week admin or 1 week timeout (5 spins/month)",
+    },
+    {
+      name: "blackjack",
+      description: "Play blackjack and gamble your explosion count!",
+      options: [
+        {
+          name: "bet",
+          description: "Amount to bet (number or 'all')",
+          type: 3, // STRING
+          required: true,
+        },
+      ],
     },
   ];
 
@@ -856,8 +986,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
   } else if (interaction.commandName === "lb") {
     try {
       await interaction.deferReply();
-      const requested = interaction.options.getInteger("count") ?? 10;
-      const topN = Math.max(1, Math.min(50, requested));
+      const page = interaction.options.getInteger("page") ?? 1;
+      const perPage = 10;
 
       // Use guild-specific leaderboard
       const guildId = interaction.guild.id;
@@ -872,13 +1002,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
 
-      const slice = entries.slice(0, topN);
-      const rows = [];
-      let rank = 1;
+      const totalPages = Math.ceil(entries.length / perPage);
+      const currentPage = Math.max(1, Math.min(page, totalPages));
+      const startIdx = (currentPage - 1) * perPage;
+      const slice = entries.slice(startIdx, startIdx + perPage);
 
-      // Find the longest display name for padding
-      const displayNames = [];
-      for (const [id] of slice) {
+      // Build leaderboard lines
+      const lines = [];
+      for (let i = 0; i < slice.length; i++) {
+        const [id, cnt] = slice[i];
+        const rank = startIdx + i + 1;
         let display = `User ${id.slice(-4)}`;
         try {
           const member = await interaction.guild.members.fetch(id);
@@ -886,29 +1019,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
         } catch (e) {
           // keep fallback
         }
-        displayNames.push(display);
-      }
-      const maxNameLen = Math.max(4, ...displayNames.map(n => n.length));
-      const maxCountLen = Math.max(5, ...slice.map(([, cnt]) => cnt.toString().length));
-
-      // Build table rows
-      for (let i = 0; i < slice.length; i++) {
-        const [, cnt] = slice[i];
-        const display = displayNames[i].padEnd(maxNameLen);
-        const countStr = cnt.toString().padStart(maxCountLen);
-        rows.push(`| ${(rank).toString().padStart(2)} | ${display} | ${countStr} |`);
-        rank++;
+        lines.push(`**${rank}.** ${display} • 💥 ${cnt.toLocaleString()}`);
       }
 
-      // Calculate total explosions
-      const totalExplosions = entries.reduce((sum, [, cnt]) => sum + cnt, 0);
+      // Find user's rank
+      const userRank = entries.findIndex(([id]) => id === interaction.user.id);
+      const userRankText = userRank >= 0 ? `Your rank: #${userRank + 1}` : "You have no explosions yet";
 
-      // Build the table
-      const header = `| #  | ${"Name".padEnd(maxNameLen)} | ${"Count".padStart(maxCountLen)} |`;
-      const divider = `|----|${"-".repeat(maxNameLen + 2)}|${"-".repeat(maxCountLen + 2)}|`;
+      // Create embed
+      const embed = new EmbedBuilder()
+        .setTitle("💣 Leaderboard")
+        .setDescription(lines.join("\n"))
+        .setColor(0x2b2d31)
+        .setFooter({ text: `Page ${currentPage}/${totalPages} • ${userRankText}` });
+
+      // Create pagination buttons
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`lb_prev_${guildId}_${currentPage}`)
+          .setLabel("Previous Page")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(currentPage <= 1),
+        new ButtonBuilder()
+          .setCustomId(`lb_next_${guildId}_${currentPage}`)
+          .setLabel("Next Page")
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(currentPage >= totalPages)
+      );
 
       await interaction.editReply({
-        content: `**Explosion Leaderboard**\n\`\`\`\n${header}\n${divider}\n${rows.join("\n")}\n\`\`\`\nTotal: ${totalExplosions} explosions from ${entries.length} players`,
+        embeds: [embed],
+        components: [row],
       });
     } catch (err) {
       console.error("Error in /lb command:", err);
@@ -1182,12 +1323,334 @@ client.on(Events.InteractionCreate, async (interaction) => {
         console.error("Failed to send error for /spin:", e);
       }
     }
+  } else if (interaction.commandName === "blackjack") {
+    // ============= /blackjack command =============
+    try {
+      const guildId = interaction.guild.id;
+      const userId = interaction.user.id;
+      const sessionKey = `${guildId}-${userId}`;
+      const betInput = interaction.options.getString("bet").toLowerCase().trim();
+
+      // Check if user already has an active game
+      if (blackjackGames.has(sessionKey)) {
+        await interaction.reply({
+          content: "❌ You already have an active blackjack game! Finish it first.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      // Check if user has enough explosions to bet
+      const guildMap = explodedCounts.get(guildId) ?? new Map();
+      const userExplosions = guildMap.get(userId) ?? 0;
+
+      // Parse bet amount
+      let bet;
+      if (betInput === "all") {
+        bet = userExplosions;
+      } else {
+        bet = parseInt(betInput);
+        if (isNaN(bet) || bet < 1) {
+          await interaction.reply({
+            content: "❌ Invalid bet! Enter a number or 'all'.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+      }
+
+      if (bet === 0 || userExplosions === 0) {
+        await interaction.reply({
+          content: "❌ You have no explosions to bet!",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      if (userExplosions < bet) {
+        await interaction.reply({
+          content: `❌ You don't have enough explosions! You have **${userExplosions}** but tried to bet **${bet}**.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      await interaction.deferReply();
+
+      // Create deck and deal initial cards
+      const deck = createDeck();
+      const playerHand = [deck.pop(), deck.pop()];
+      const dealerHand = [deck.pop(), deck.pop()];
+
+      const playerTotal = calculateHand(playerHand);
+      const dealerTotal = calculateHand(dealerHand);
+
+      // Check for natural blackjack
+      if (playerTotal === 21) {
+        // Player has blackjack!
+        const dealerHasBlackjack = dealerTotal === 21;
+
+        if (dealerHasBlackjack) {
+          // Push - return bet
+          const embed = new EmbedBuilder()
+            .setTitle("🃏 Blackjack - Push!")
+            .setDescription(`Both have Blackjack! It's a tie.`)
+            .addFields(
+              { name: "Your Hand", value: `${formatHand(playerHand)} (${playerTotal})`, inline: true },
+              { name: "Dealer's Hand", value: `${formatHand(dealerHand)} (${dealerTotal})`, inline: true },
+              { name: "Result", value: `Bet returned: **${bet}** explosions`, inline: false }
+            )
+            .setColor(0xffff00);
+
+          await interaction.editReply({ embeds: [embed], components: [] });
+        } else {
+          // Player wins 1.5x (blackjack pays 3:2)
+          const winnings = Math.floor(bet * 1.5);
+          guildMap.set(userId, userExplosions + winnings);
+          saveLeaderboardDebounced();
+
+          const embed = new EmbedBuilder()
+            .setTitle("🃏 Blackjack - BLACKJACK!")
+            .setDescription(`You got a natural Blackjack!`)
+            .addFields(
+              { name: "Your Hand", value: `${formatHand(playerHand)} (${playerTotal})`, inline: true },
+              { name: "Dealer's Hand", value: `${formatHand(dealerHand)} (${dealerTotal})`, inline: true },
+              { name: "Result", value: `You won **${winnings}** explosions! (3:2 payout)`, inline: false }
+            )
+            .setColor(0x00ff00);
+
+          await interaction.editReply({ embeds: [embed], components: [] });
+        }
+        return;
+      }
+
+      // Store game state
+      blackjackGames.set(sessionKey, {
+        bet,
+        playerHand,
+        dealerHand,
+        deck,
+        status: "playing",
+      });
+
+      // Create game embed
+      const embed = new EmbedBuilder()
+        .setTitle("🃏 Blackjack")
+        .setDescription(`Bet: **${bet}** explosions`)
+        .addFields(
+          { name: "Your Hand", value: `${formatHand(playerHand)} (${playerTotal})`, inline: true },
+          { name: "Dealer's Hand", value: `${formatHand(dealerHand, true)}`, inline: true }
+        )
+        .setColor(0x2b2d31)
+        .setFooter({ text: "Hit to draw another card, Stand to end your turn" });
+
+      // Create buttons
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`bj_hit_${guildId}_${userId}`)
+          .setLabel("Hit")
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`bj_stand_${guildId}_${userId}`)
+          .setLabel("Stand")
+          .setStyle(ButtonStyle.Secondary)
+      );
+
+      await interaction.editReply({ embeds: [embed], components: [row] });
+
+      // Auto-expire game after 2 minutes
+      setTimeout(() => {
+        if (blackjackGames.has(sessionKey)) {
+          blackjackGames.delete(sessionKey);
+        }
+      }, 120000);
+
+    } catch (err) {
+      console.error("Error in /blackjack command:", err);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({
+            content: "⚠️ An error occurred!",
+            flags: MessageFlags.Ephemeral,
+          });
+        } else {
+          await interaction.followUp({
+            content: "⚠️ An error occurred!",
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+      } catch (e) {
+        console.error("Failed to send error for /blackjack:", e);
+      }
+    }
   }
 });
 
-// Handle button interactions for spin double-or-nothing
+// Handle button interactions for spin double-or-nothing and leaderboard pagination
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isButton()) return;
+
+  // Handle leaderboard pagination buttons
+  if (interaction.customId.startsWith("lb_prev_") || interaction.customId.startsWith("lb_next_")) {
+    try {
+      const parts = interaction.customId.split("_");
+      const direction = parts[1]; // "prev" or "next"
+      const guildId = parts[2];
+      const currentPage = parseInt(parts[3]);
+
+      const newPage = direction === "next" ? currentPage + 1 : currentPage - 1;
+      const perPage = 10;
+
+      // Get leaderboard data
+      const guildMap = explodedCounts.get(guildId) ?? new Map();
+      const entries = Array.from(guildMap.entries());
+      entries.sort((a, b) => b[1] - a[1]);
+
+      const totalPages = Math.ceil(entries.length / perPage);
+      const validPage = Math.max(1, Math.min(newPage, totalPages));
+      const startIdx = (validPage - 1) * perPage;
+      const slice = entries.slice(startIdx, startIdx + perPage);
+
+      // Build leaderboard lines
+      const lines = [];
+      for (let i = 0; i < slice.length; i++) {
+        const [id, cnt] = slice[i];
+        const rank = startIdx + i + 1;
+        let display = `User ${id.slice(-4)}`;
+        try {
+          const member = await interaction.guild.members.fetch(id);
+          display = member.displayName;
+        } catch (e) {
+          // keep fallback
+        }
+        lines.push(`**${rank}.** ${display} • 💥 ${cnt.toLocaleString()}`);
+      }
+
+      // Find user's rank
+      const userRank = entries.findIndex(([id]) => id === interaction.user.id);
+      const userRankText = userRank >= 0 ? `Your rank: #${userRank + 1}` : "You have no explosions yet";
+
+      // Create embed
+      const embed = new EmbedBuilder()
+        .setTitle("💣 Leaderboard")
+        .setDescription(lines.join("\n"))
+        .setColor(0x2b2d31)
+        .setFooter({ text: `Page ${validPage}/${totalPages} • ${userRankText}` });
+
+      // Create pagination buttons
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`lb_prev_${guildId}_${validPage}`)
+          .setLabel("Previous Page")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(validPage <= 1),
+        new ButtonBuilder()
+          .setCustomId(`lb_next_${guildId}_${validPage}`)
+          .setLabel("Next Page")
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(validPage >= totalPages)
+      );
+
+      await interaction.update({
+        embeds: [embed],
+        components: [row],
+      });
+    } catch (err) {
+      console.error("Error handling leaderboard pagination:", err);
+    }
+    return;
+  }
+
+  // Handle blackjack buttons
+  if (interaction.customId.startsWith("bj_hit_") || interaction.customId.startsWith("bj_stand_")) {
+    try {
+      const parts = interaction.customId.split("_");
+      const action = parts[1]; // "hit" or "stand"
+      const guildId = parts[2];
+      const targetUserId = parts[3];
+      const sessionKey = `${guildId}-${targetUserId}`;
+
+      // Only the original user can click the button
+      if (interaction.user.id !== targetUserId) {
+        await interaction.reply({
+          content: "❌ This isn't your game!",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      const game = blackjackGames.get(sessionKey);
+      if (!game) {
+        await interaction.reply({
+          content: "❌ This game has expired! Start a new one with /blackjack",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      const guildMap = explodedCounts.get(guildId) ?? new Map();
+      const userExplosions = guildMap.get(targetUserId) ?? 0;
+
+      if (action === "hit") {
+        // Draw a card
+        game.playerHand.push(game.deck.pop());
+        const playerTotal = calculateHand(game.playerHand);
+
+        if (playerTotal > 21) {
+          // Player busted!
+          blackjackGames.delete(sessionKey);
+          const newTotal = Math.max(0, userExplosions - game.bet);
+          guildMap.set(targetUserId, newTotal);
+          if (!explodedCounts.has(guildId)) explodedCounts.set(guildId, guildMap);
+          saveLeaderboardDebounced();
+
+          const embed = new EmbedBuilder()
+            .setTitle("🃏 Blackjack - BUST!")
+            .setDescription(`You went over 21!`)
+            .addFields(
+              { name: "Your Hand", value: `${formatHand(game.playerHand)} (${playerTotal})`, inline: true },
+              { name: "Dealer's Hand", value: `${formatHand(game.dealerHand)} (${calculateHand(game.dealerHand)})`, inline: true },
+              { name: "Result", value: `You lost **${game.bet}** explosions!`, inline: false }
+            )
+            .setColor(0xff0000);
+
+          await interaction.update({ embeds: [embed], components: [] });
+        } else if (playerTotal === 21) {
+          // Player has 21, auto-stand
+          await handleDealerTurn(interaction, game, guildMap, targetUserId, guildId, sessionKey);
+        } else {
+          // Continue playing
+          const embed = new EmbedBuilder()
+            .setTitle("🃏 Blackjack")
+            .setDescription(`Bet: **${game.bet}** explosions`)
+            .addFields(
+              { name: "Your Hand", value: `${formatHand(game.playerHand)} (${playerTotal})`, inline: true },
+              { name: "Dealer's Hand", value: `${formatHand(game.dealerHand, true)}`, inline: true }
+            )
+            .setColor(0x2b2d31)
+            .setFooter({ text: "Hit to draw another card, Stand to end your turn" });
+
+          const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`bj_hit_${guildId}_${targetUserId}`)
+              .setLabel("Hit")
+              .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+              .setCustomId(`bj_stand_${guildId}_${targetUserId}`)
+              .setLabel("Stand")
+              .setStyle(ButtonStyle.Secondary)
+          );
+
+          await interaction.update({ embeds: [embed], components: [row] });
+        }
+      } else if (action === "stand") {
+        await handleDealerTurn(interaction, game, guildMap, targetUserId, guildId, sessionKey);
+      }
+    } catch (err) {
+      console.error("Error handling blackjack buttons:", err);
+    }
+    return;
+  }
 
   // Handle spin buttons
   if (interaction.customId.startsWith("spin_double_") || interaction.customId.startsWith("spin_keep_")) {

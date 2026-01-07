@@ -454,7 +454,7 @@ client.once(Events.ClientReady, async () => {
         },
         {
           name: "value",
-          description: "Amount of experience points.",
+          description: "Amount of explosions.",
           type: 4, // INTEGER
           required: false,
         },
@@ -1445,14 +1445,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (!action) {
          const targetUser = username ?? interaction.user;
          const xp = guildMap.get(targetUser.id) ?? 0;
-         await interaction.reply({ content: `**${targetUser.username}** has **${xp} XP** (explosions).` });
+         await interaction.reply({ content: `**${targetUser.username}** has **${xp} explosions**.` });
          return;
       }
 
       // Mode: Edit (Action provided)
       // Permission check
       if (!interaction.member.permissions.has("Administrator") && interaction.user.id !== interaction.guild.ownerId) {
-        await interaction.reply({ content: "You do not have permission to manage XP.", flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: "You do not have permission to manage explosions.", flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -1482,8 +1482,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       // Create a summary embed
       const embed = new EmbedBuilder()
-        .setTitle("XP Update")
-        .setDescription(`Successfully ${actionText} **${targetUser.username}**.\n\n**Old XP:** ${currentXp}\n**New XP:** ${newXp}`)
+        .setTitle("Explosions Update")
+        .setDescription(`Successfully ${actionText} **${targetUser.username}**.\n\n**Old Explosions:** ${currentXp}\n**New Explosions:** ${newXp}`)
         .setColor(0x00ff00)
         .setTimestamp();
       

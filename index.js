@@ -86,6 +86,11 @@ const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
 // Spin data: Map<guildId, { month: "YYYY-MM", users: [{ id, timestamp, result }] }>
 const spinData = new Map();
 
+// XP Data: Map<guildId, Map<userId, xp>>
+const xpData = new Map();
+const XP_FILE = path.join(DATA_DIR, "xp.json");
+let _xpSaveTimer = null;
+
 // Active spin sessions (for double-or-nothing): Map<`${guildId}-${userId}`, { expires, stage }>
 const activeSpinSessions = new Map();
 
@@ -318,6 +323,49 @@ function saveSpinDataDebounced() {
   }, SAVE_DEBOUNCE_MS);
 }
 
+// ---- XP Data Persistence ----
+function loadXpData() {
+  try {
+    ensureDataDir();
+    if (!fs.existsSync(XP_FILE)) return;
+    const raw = fs.readFileSync(XP_FILE, "utf8");
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    for (const [guildId, guildObj] of Object.entries(parsed)) {
+      const gmap = new Map(
+        Object.entries(guildObj).map(([k, v]) => [k, Number(v)])
+      );
+      xpData.set(guildId, gmap);
+    }
+    console.log("✅ Loaded XP data from", XP_FILE);
+  } catch (e) {
+    console.error("Failed to load XP data:", e);
+  }
+}
+
+function saveXpData() {
+  try {
+    ensureDataDir();
+    const obj = {};
+    for (const [guildId, gmap] of xpData.entries()) {
+      obj[guildId] = Object.fromEntries(gmap);
+    }
+    const tmp = XP_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(obj), "utf8");
+    fs.renameSync(tmp, XP_FILE);
+  } catch (e) {
+    console.error("Failed to save XP data:", e);
+  }
+}
+
+function saveXpDataDebounced() {
+  if (_xpSaveTimer) clearTimeout(_xpSaveTimer);
+  _xpSaveTimer = setTimeout(() => {
+    saveXpData();
+    _xpSaveTimer = null;
+  }, SAVE_DEBOUNCE_MS);
+}
+
 // Helper: Get current month string (YYYY-MM)
 function getCurrentMonth() {
   const now = new Date();
@@ -341,16 +389,19 @@ function getGuildSpinData(guildId) {
 // load on startup
 loadLeaderboard();
 loadSpinData();
+loadXpData();
 
 // save on graceful shutdown
 process.on("SIGINT", () => {
   saveLeaderboard();
   saveSpinData();
+  saveXpData();
   process.exit();
 });
 process.on("SIGTERM", () => {
   saveLeaderboard();
   saveSpinData();
+  saveXpData();
   process.exit();
 });
 process.on("exit", () => {
@@ -416,35 +467,6 @@ client.once(Events.ClientReady, async () => {
       ],
     },
     {
-      name: "exp",
-      description: "View your explosion count, or manage counts (admin only)",
-      options: [
-        {
-          name: "action",
-          description: "What to do with the amount (admin only)",
-          type: 3, // STRING
-          required: false,
-          choices: [
-            { name: "add", value: "add" },
-            { name: "remove", value: "remove" },
-            { name: "set", value: "set" },
-          ],
-        },
-        {
-          name: "user",
-          description: "The user to update (admin only)",
-          type: 6, // USER
-          required: false,
-        },
-        {
-          name: "amount",
-          description: "Amount to add/remove/set (admin only)",
-          type: 4, // INTEGER
-          required: false,
-        },
-      ],
-    },
-    {
       name: "spin",
       description: "Spin the wheel! 50/50 chance for 1 week admin or 1 week timeout (5 spins/month)",
     },
@@ -457,6 +479,35 @@ client.once(Events.ClientReady, async () => {
           description: "Amount to bet (number or 'all')",
           type: 3, // STRING
           required: true,
+        },
+      ],
+    },
+    {
+      name: "xp",
+      description: "View or change a user's xp.",
+      options: [
+        {
+          name: "username",
+          description: "The username of the user that you'd like to view / edit.",
+          type: 6, // USER
+          required: false,
+        },
+        {
+          name: "action",
+          description: "add / remove / set",
+          type: 3, // STRING
+          required: false,
+          choices: [
+            { name: "add", value: "add" },
+            { name: "remove", value: "remove" },
+            { name: "set", value: "set" },
+          ],
+        },
+        {
+          name: "value",
+          description: "Amount of experience points.",
+          type: 4, // INTEGER
+          required: false,
         },
       ],
     },
@@ -1091,100 +1142,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         console.error("Failed to send error message for /lb:", e);
       }
     }
-  } else if (interaction.commandName === "exp") {
-    try {
-      await interaction.deferReply();
-
-      const targetUser = interaction.options.getUser("user");
-      const amount = interaction.options.getInteger("amount");
-      const action = interaction.options.getString("action");
-      const guildId = interaction.guild.id;
-
-      // If no action provided, show explosion count (own or specified user)
-      if (!action && amount === null) {
-        const guildMap = explodedCounts.get(guildId) ?? new Map();
-        const viewUser = targetUser ?? interaction.user;
-        const userCount = guildMap.get(viewUser.id) ?? 0;
-
-        if (targetUser) {
-          // Viewing another user's count
-          await interaction.editReply({
-            content: `💥 **${targetUser.tag}** has been exploded **${userCount}** time${userCount === 1 ? "" : "s"}!`,
-          });
-        } else {
-          // Viewing own count
-          await interaction.editReply({
-            content: `💥 You have been exploded **${userCount}** time${userCount === 1 ? "" : "s"}!`,
-          });
-        }
-        return;
-      }
-
-      // For management actions, require admin permissions
-      const isOwner = interaction.guild.ownerId === interaction.user.id;
-      const isAdmin = interaction.member.permissions.has("Administrator");
-      if (!isOwner && !isAdmin) {
-        await interaction.editReply({
-          content: "You don't have permission to manage this!",
-        });
-        return;
-      }
-
-      // Validate that all required fields are present for management
-      if (!action || !targetUser || amount === null) {
-        await interaction.editReply({
-          content: "You must provide an action, user, and amount",
-        });
-        return;
-      }
-
-      if (!explodedCounts.has(guildId)) {
-        explodedCounts.set(guildId, new Map());
-      }
-      const guildMap = explodedCounts.get(guildId);
-
-      const currentCount = guildMap.get(targetUser.id) ?? 0;
-      let newCount = currentCount;
-      let actionText = "";
-
-      if (action === "add") {
-        newCount = currentCount + amount;
-        actionText = `added ${amount} to`;
-      } else if (action === "remove") {
-        newCount = Math.max(0, currentCount - amount);
-        actionText = `removed ${amount} from`;
-      } else if (action === "set") {
-        newCount = Math.max(0, amount);
-        actionText = `set to ${amount} for`;
-      }
-
-      guildMap.set(targetUser.id, newCount);
-      saveLeaderboardDebounced();
-
-      await interaction.editReply({
-        content: `✅ Successfully ${actionText} **${targetUser.tag}**. New total: **${newCount}** explosions.`,
-      });
-      console.log(
-        `[EXP] ${interaction.user.tag} (${action}) ${amount} for ${targetUser.tag}. New total: ${newCount}`
-      );
-    } catch (err) {
-      console.error("Error in /exp command:", err);
-      try {
-        if (!interaction.replied && !interaction.deferred) {
-          await interaction.reply({
-            content: "⚠️ An error occurred!",
-            flags: MessageFlags.Ephemeral,
-          });
-        } else {
-          await interaction.followUp({
-            content: "⚠️ An error occurred!",
-            flags: MessageFlags.Ephemeral,
-          });
-        }
-      } catch (e) {
-        console.error("Failed to send error for /exp:", e);
-      }
-    }
   } else if (interaction.commandName === "spin") {
     // ============= /spin command =============
     try {
@@ -1519,6 +1476,73 @@ client.on(Events.InteractionCreate, async (interaction) => {
       } catch (e) {
         console.error("Failed to send error for /blackjack:", e);
       }
+    }
+  } else if (interaction.commandName === "xp") {
+    try {
+      if (!interaction.guild) {
+        await interaction.reply({ content: "This command can only be used in a server.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const username = interaction.options.getUser("username");
+      const action = interaction.options.getString("action");
+      const value = interaction.options.getInteger("value");
+      const guildId = interaction.guild.id;
+
+      if (!xpData.has(guildId)) xpData.set(guildId, new Map());
+      const guildXp = xpData.get(guildId);
+
+      // Mode: View (No action provided)
+      if (!action) {
+         const targetUser = username ?? interaction.user;
+         const xp = guildXp.get(targetUser.id) ?? 0;
+         await interaction.reply({ content: `**${targetUser.username}** has **${xp} XP**.` });
+         return;
+      }
+
+      // Mode: Edit (Action provided)
+      // Permission check
+      if (!interaction.member.permissions.has("Administrator") && interaction.user.id !== interaction.guild.ownerId) {
+        await interaction.reply({ content: "You do not have permission to manage XP.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const targetUser = username ?? interaction.user; // Defaults to self if not specified
+      if (value === null) {
+          await interaction.reply({ content: "You must provide a value when performing an action.", flags: MessageFlags.Ephemeral });
+          return;
+      }
+
+      const currentXp = guildXp.get(targetUser.id) ?? 0;
+      let newXp = currentXp;
+      let actionText = "";
+
+      if (action === "add") {
+          newXp = currentXp + value;
+          actionText = "added to";
+      } else if (action === "remove") {
+          newXp = Math.max(0, currentXp - value);
+          actionText = "removed from";
+      } else if (action === "set") {
+          newXp = Math.max(0, value);
+          actionText = "set for";
+      }
+
+      guildXp.set(targetUser.id, newXp);
+      saveXpDataDebounced();
+
+      // Create a summary embed
+      const embed = new EmbedBuilder()
+        .setTitle("XP Update")
+        .setDescription(`Successfully ${actionText} **${targetUser.username}**.\n\n**Old XP:** ${currentXp}\n**New XP:** ${newXp}`)
+        .setColor(0x00ff00)
+        .setTimestamp();
+      
+      await interaction.reply({ embeds: [embed] });
+
+    } catch (err) {
+      console.error("Error in /xp:", err);
+      if (!interaction.replied) await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
     }
   }
 });

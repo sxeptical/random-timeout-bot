@@ -86,11 +86,6 @@ const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
 // Spin data: Map<guildId, { month: "YYYY-MM", users: [{ id, timestamp, result }] }>
 const spinData = new Map();
 
-// XP Data: Map<guildId, Map<userId, xp>>
-const xpData = new Map();
-const XP_FILE = path.join(DATA_DIR, "xp.json");
-let _xpSaveTimer = null;
-
 // Active spin sessions (for double-or-nothing): Map<`${guildId}-${userId}`, { expires, stage }>
 const activeSpinSessions = new Map();
 
@@ -323,49 +318,6 @@ function saveSpinDataDebounced() {
   }, SAVE_DEBOUNCE_MS);
 }
 
-// ---- XP Data Persistence ----
-function loadXpData() {
-  try {
-    ensureDataDir();
-    if (!fs.existsSync(XP_FILE)) return;
-    const raw = fs.readFileSync(XP_FILE, "utf8");
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    for (const [guildId, guildObj] of Object.entries(parsed)) {
-      const gmap = new Map(
-        Object.entries(guildObj).map(([k, v]) => [k, Number(v)])
-      );
-      xpData.set(guildId, gmap);
-    }
-    console.log("✅ Loaded XP data from", XP_FILE);
-  } catch (e) {
-    console.error("Failed to load XP data:", e);
-  }
-}
-
-function saveXpData() {
-  try {
-    ensureDataDir();
-    const obj = {};
-    for (const [guildId, gmap] of xpData.entries()) {
-      obj[guildId] = Object.fromEntries(gmap);
-    }
-    const tmp = XP_FILE + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify(obj), "utf8");
-    fs.renameSync(tmp, XP_FILE);
-  } catch (e) {
-    console.error("Failed to save XP data:", e);
-  }
-}
-
-function saveXpDataDebounced() {
-  if (_xpSaveTimer) clearTimeout(_xpSaveTimer);
-  _xpSaveTimer = setTimeout(() => {
-    saveXpData();
-    _xpSaveTimer = null;
-  }, SAVE_DEBOUNCE_MS);
-}
-
 // Helper: Get current month string (YYYY-MM)
 function getCurrentMonth() {
   const now = new Date();
@@ -389,19 +341,16 @@ function getGuildSpinData(guildId) {
 // load on startup
 loadLeaderboard();
 loadSpinData();
-loadXpData();
 
 // save on graceful shutdown
 process.on("SIGINT", () => {
   saveLeaderboard();
   saveSpinData();
-  saveXpData();
   process.exit();
 });
 process.on("SIGTERM", () => {
   saveLeaderboard();
   saveSpinData();
-  saveXpData();
   process.exit();
 });
 process.on("exit", () => {
@@ -1489,14 +1438,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const value = interaction.options.getInteger("value");
       const guildId = interaction.guild.id;
 
-      if (!xpData.has(guildId)) xpData.set(guildId, new Map());
-      const guildXp = xpData.get(guildId);
+      if (!explodedCounts.has(guildId)) explodedCounts.set(guildId, new Map());
+      const guildMap = explodedCounts.get(guildId);
 
       // Mode: View (No action provided)
       if (!action) {
          const targetUser = username ?? interaction.user;
-         const xp = guildXp.get(targetUser.id) ?? 0;
-         await interaction.reply({ content: `**${targetUser.username}** has **${xp} XP**.` });
+         const xp = guildMap.get(targetUser.id) ?? 0;
+         await interaction.reply({ content: `**${targetUser.username}** has **${xp} XP** (explosions).` });
          return;
       }
 
@@ -1513,7 +1462,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return;
       }
 
-      const currentXp = guildXp.get(targetUser.id) ?? 0;
+      const currentXp = guildMap.get(targetUser.id) ?? 0;
       let newXp = currentXp;
       let actionText = "";
 
@@ -1528,8 +1477,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
           actionText = "set for";
       }
 
-      guildXp.set(targetUser.id, newXp);
-      saveXpDataDebounced();
+      guildMap.set(targetUser.id, newXp);
+      saveLeaderboardDebounced();
 
       // Create a summary embed
       const embed = new EmbedBuilder()

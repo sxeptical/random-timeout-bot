@@ -144,6 +144,28 @@ function formatHand(hand, hideSecond = false) {
   return hand.map(formatCard).join(" | ");
 }
 
+// Helper function to safely update an interaction, handling expired tokens
+async function safeInteractionUpdate(interaction, options) {
+  try {
+    await interaction.update(options);
+    return true;
+  } catch (err) {
+    // Error code 10062 = Unknown interaction (token expired)
+    if (err.code === 10062) {
+      console.log("Interaction token expired, attempting to edit message directly");
+      try {
+        // Try to edit the message directly instead
+        await interaction.message.edit(options);
+        return true;
+      } catch (editErr) {
+        console.error("Failed to edit message directly:", editErr.message);
+        return false;
+      }
+    }
+    throw err; // Re-throw other errors
+  }
+}
+
 async function handleDealerTurn(interaction, game, guildMap, userId, guildId, sessionKey) {
   // Dealer draws until 17 or higher
   while (calculateHand(game.dealerHand) < 17) {
@@ -203,7 +225,7 @@ async function handleDealerTurn(interaction, game, guildMap, userId, guildId, se
     )
     .setColor(resultColor);
 
-  await interaction.update({ embeds: [embed], components: [] });
+  await safeInteractionUpdate(interaction, { embeds: [embed], components: [] });
 }
 
 function ensureDataDir() {
@@ -1629,7 +1651,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             )
             .setColor(0xff0000);
 
-          await interaction.update({ embeds: [embed], components: [] });
+          await safeInteractionUpdate(interaction, { embeds: [embed], components: [] });
         } else if (playerTotal === 21) {
           // Player has 21, auto-stand
           await handleDealerTurn(interaction, game, guildMap, targetUserId, guildId, sessionKey);
@@ -1656,13 +1678,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
               .setStyle(ButtonStyle.Secondary)
           );
 
-          await interaction.update({ embeds: [embed], components: [row] });
+          await safeInteractionUpdate(interaction, { embeds: [embed], components: [row] });
         }
       } else if (action === "stand") {
         await handleDealerTurn(interaction, game, guildMap, targetUserId, guildId, sessionKey);
       }
     } catch (err) {
-      console.error("Error handling blackjack buttons:", err);
+      // Don't log "Unknown interaction" errors as they're expected when tokens expire
+      if (err.code !== 10062) {
+        console.error("Error handling blackjack buttons:", err);
+      } else {
+        console.log(`Blackjack interaction expired for user ${interaction.user?.tag || 'unknown'}`);
+      }
     }
     return;
   }

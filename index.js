@@ -1458,12 +1458,27 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       await interaction.editReply({ embeds: [embed], components: [row] });
 
-      // Auto-expire game after 2 minutes
-      setTimeout(() => {
+      // Auto-expire game after 5 minutes
+      setTimeout(async () => {
         if (blackjackGames.has(sessionKey)) {
           blackjackGames.delete(sessionKey);
+          // Try to notify user the game expired
+          try {
+            const expiredEmbed = new EmbedBuilder()
+              .setTitle("🃏 Blackjack - EXPIRED")
+              .setDescription(`Game timed out after 5 minutes of inactivity.`)
+              .addFields(
+                { name: "Your Hand", value: `${formatHand(playerHand)} (${playerTotal})`, inline: true },
+                { name: "Dealer's Hand", value: `${formatHand(dealerHand, true)}`, inline: true },
+                { name: "Result", value: `Bet returned: **${bet}** explosions (no penalty)`, inline: false }
+              )
+              .setColor(0x808080);
+            await interaction.editReply({ embeds: [expiredEmbed], components: [] });
+          } catch (e) {
+            // Interaction may have expired, ignore
+          }
         }
-      }, 120000);
+      }, 300000); // 5 minutes
 
     } catch (err) {
       console.error("Error in /blackjack command:", err);

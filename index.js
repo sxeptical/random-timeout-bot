@@ -460,6 +460,25 @@ client.once(Events.ClientReady, async () => {
         },
       ],
     },
+    {
+      name: "roulette",
+      description: "Play roulette with your explosions!",
+      options: [
+        {
+          name: "bet",
+          description: "Amount to bet (number or 'all')",
+          type: 3, // STRING
+          required: true,
+        },
+        {
+          name: "space",
+          description: "The space to bet on",
+          type: 3, // STRING
+          required: true,
+          autocomplete: true,
+        },
+      ],
+    },
   ];
 
   const rest = new REST({ version: "10" }).setToken(TOKEN);
@@ -611,6 +630,44 @@ client.on(Events.MessageCreate, async (message) => {
 
 // Handle slash command interactions
 client.on(Events.InteractionCreate, async (interaction) => {
+  if (interaction.isAutocomplete()) {
+    const focusedOption = interaction.options.getFocused(true);
+    if (interaction.commandName === 'roulette' && focusedOption.name === 'space') {
+      const choices = [
+        "Red", "Black", "Even", "Odd",
+        "1-18", "19-36",
+        "1st 12", "2nd 12", "3rd 12",
+        "0"
+      ];
+      // Add numbers 1-36
+      for (let i = 1; i <= 36; i++) choices.push(i.toString());
+
+      const filtered = choices.filter(choice =>
+        choice.toLowerCase().startsWith(focusedOption.value.toLowerCase())
+      );
+
+      // Limit to 25 choices
+      await interaction.respond(
+        filtered.slice(0, 25).map(choice => {
+          let name = choice;
+          // Add odds info to name for clarity
+          if (["Red", "Black", "Even", "Odd", "1-18", "19-36"].includes(choice)) name += " (1:1)";
+          else if (["1st 12", "2nd 12", "3rd 12"].includes(choice)) name += " (2:1)";
+          else name += " (35:1)"; // Numbers
+
+          // Map display name to internal value
+          let value = choice.toLowerCase();
+          if (choice === "1st 12") value = "1-12";
+          else if (choice === "2nd 12") value = "13-24";
+          else if (choice === "3rd 12") value = "25-36";
+
+          return { name, value };
+        })
+      );
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   if (interaction.commandName === "roll") {
@@ -1492,6 +1549,162 @@ client.on(Events.InteractionCreate, async (interaction) => {
     } catch (err) {
       console.error("Error in /xp:", err);
       if (!interaction.replied) await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+    }
+  } else if (interaction.commandName === "roulette") {
+    try {
+      const guildId = interaction.guild.id;
+      const userId = interaction.user.id;
+      const betInput = interaction.options.getString("bet").toLowerCase().trim();
+      const bettingSpace = interaction.options.getString("space");
+
+      if (!explodedCounts.has(guildId)) explodedCounts.set(guildId, new Map());
+      const guildMap = explodedCounts.get(guildId);
+      const userExplosions = guildMap.get(userId) ?? 0;
+
+      // Parse bet amount
+      let bet;
+      if (betInput === "all") {
+        bet = userExplosions;
+      } else {
+        bet = parseInt(betInput);
+        if (isNaN(bet) || bet < 1) {
+          await interaction.reply({
+            content: "❌ Invalid bet! Enter a number or 'all'.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+      }
+
+      if (bet === 0 || userExplosions === 0) {
+        await interaction.reply({
+          content: "❌ You have no explosions to bet!",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      if (userExplosions < bet) {
+        await interaction.reply({
+          content: `❌ You don't have enough explosions! You have **${userExplosions}** but tried to bet **${bet}**.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      await interaction.deferReply();
+
+      // Spin the wheel (0-36)
+      const number = Math.floor(Math.random() * 37);
+      
+      const ROULETTE_RED = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
+      const ROULETTE_BLACK = [2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35];
+
+      let color = "green";
+      let colorEmoji = "🟢";
+      if (ROULETTE_RED.includes(number)) {
+        color = "red";
+        colorEmoji = "🔴";
+      } else if (ROULETTE_BLACK.includes(number)) {
+        color = "black";
+        colorEmoji = "⚫";
+      }
+
+      let won = false;
+      let multiplier = 0;
+
+      switch (bettingSpace) {
+        case "red":
+          if (color === "red") { won = true; multiplier = 1; }
+          break;
+        case "black":
+          if (color === "black") { won = true; multiplier = 1; }
+          break;
+        case "even":
+          if (number !== 0 && number % 2 === 0) { won = true; multiplier = 1; }
+          break;
+        case "odd":
+          if (number !== 0 && number % 2 !== 0) { won = true; multiplier = 1; }
+          break;
+        case "1-18":
+          if (number >= 1 && number <= 18) { won = true; multiplier = 1; }
+          break;
+        case "19-36":
+          if (number >= 19 && number <= 36) { won = true; multiplier = 1; }
+          break;
+        case "1-12":
+          if (number >= 1 && number <= 12) { won = true; multiplier = 2; }
+          break;
+        case "13-24":
+          if (number >= 13 && number <= 24) { won = true; multiplier = 2; }
+          break;
+        case "25-36":
+          if (number >= 25 && number <= 36) { won = true; multiplier = 2; }
+          break;
+        case "0":
+          if (number === 0) { won = true; multiplier = 35; }
+          break;
+        default:
+          const num = parseInt(bettingSpace);
+          if (!isNaN(num) && num >= 1 && num <= 36) {
+             if (number === num) { won = true; multiplier = 35; }
+          }
+          break;
+      }
+
+      let resultTitle, resultDesc, resultColor;
+      
+      if (won) {
+        const winnings = bet * multiplier;
+        // Logic: if multiplier is 1 (e.g. Red), you win 1x bet. Total added = winnings.
+        
+        guildMap.set(userId, userExplosions + winnings);
+        
+        resultTitle = "🎰 Roulette - WIN!";
+        resultDesc = `The ball landed on **${number}** ${colorEmoji}!`;
+        resultColor = 0x00ff00;
+        
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setTitle(resultTitle)
+            .setDescription(resultDesc)
+            .addFields(
+              { name: "Your Bet", value: `${bet} on ${bettingSpace}`, inline: true },
+              { name: "Result", value: `You won **${winnings}** explosions!`, inline: true }
+            )
+            .setColor(resultColor)
+          ]
+        });
+      } else {
+        // Lost
+        guildMap.set(userId, Math.max(0, userExplosions - bet));
+        
+        resultTitle = "🎰 Roulette - LOSE";
+        resultDesc = `The ball landed on **${number}** ${colorEmoji}!`;
+        resultColor = 0xff0000;
+        
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setTitle(resultTitle)
+            .setDescription(resultDesc)
+            .addFields(
+              { name: "Your Bet", value: `${bet} on ${bettingSpace}`, inline: true },
+              { name: "Result", value: `You lost **${bet}** explosions.`, inline: true }
+            )
+            .setColor(resultColor)
+          ]
+        });
+      }
+
+      saveLeaderboardDebounced();
+
+    } catch (err) {
+      console.error("Error in /roulette:", err);
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+      } else {
+        await interaction.followUp({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+      }
     }
   }
 });

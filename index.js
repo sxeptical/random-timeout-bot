@@ -1,5 +1,6 @@
 console.log("Starting bot...");
 import "dotenv/config";
+import { getLevelFromXp, getXpForLevel, getDataSafe } from "./utils.js";
 console.log("dotenv loaded");
 import {
   Client,
@@ -198,7 +199,7 @@ async function handleDealerTurn(
   const playerTotal = calculateHand(game.playerHand);
   const dealerTotal = calculateHand(game.dealerHand);
   // Update user's explosions
-  const userId = game.userId ?? interaction.user.id;
+
   const userData = getDataSafe(guildMap, userId);
   const userExplosions = userData.explosions;
 
@@ -406,24 +407,7 @@ process.on("exit", () => {
   saveSpinData();
 });
 
-// XP Helpers
-function getLevelFromXp(xp) {
-  return Math.floor(0.1 * Math.sqrt(xp)) + 1;
-}
-
-function getXpForLevel(level) {
-  if (level <= 1) return 0;
-  return Math.pow((level - 1) / 0.1, 2);
-}
-
-function getDataSafe(guildMap, userId) {
-  let val = guildMap.get(userId);
-  if (typeof val === "number") {
-    val = { explosions: val, xp: 0, level: 1 };
-    guildMap.set(userId, val);
-  }
-  return val || { explosions: 0, xp: 0, level: 1 };
-}
+// XP Helpers imported from utils.js
 
 function recordExplosion(member) {
   try {
@@ -1699,6 +1683,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const guildId = interaction.guild.id;
 
       const type = interaction.options.getString("type") || "xp";
+      const targetUser = username ?? interaction.user;
 
       if (!explodedCounts.has(guildId)) explodedCounts.set(guildId, new Map());
       const guildMap = explodedCounts.get(guildId);

@@ -1,5 +1,8 @@
 node_modules/
 .env
+<<<<<<< HEAD
 test/utils.test.js
+=======
+>>>>>>> 22a8395b203c7962ed9bfb60f626de34a182a047
 data/leaderboard.json
 data/spin.json

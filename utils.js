@@ -1,37 +1,34 @@
 /**
- * Utility functions for the random-timeout-bot
- */
-
-/**
- * Get the XP required to reach a specific level.
- * Uses a simple quadratic formula: 100 * level^2
- * @param {number} level - The level to calculate XP for
- * @returns {number} The total XP required to reach that level
- */
-export function getXpForLevel(level) {
-    return 100 * level * level;
-}
-
-/**
- * Calculate the level from a given XP amount.
- * Inverse of getXpForLevel: level = floor(sqrt(xp / 100))
- * @param {number} xp - The XP amount
- * @returns {number} The level for that XP amount
+ * Calculates Level from XP using a quadratic curve.
+ * Formula: Level = floor(0.1 * sqrt(XP)) + 1
+ * @param {number} xp
+ * @returns {number} level
  */
 export function getLevelFromXp(xp) {
-    if (xp <= 0) return 0;
-    return Math.floor(Math.sqrt(xp / 100));
+    return Math.floor(0.1 * Math.sqrt(xp)) + 1;
 }
 
 /**
- * Safely get user data from a guild map, creating default data if not exists.
- * @param {Map} guildMap - The guild's user data map
- * @param {string} userId - The user's ID
- * @returns {Object} The user's data object with explosions, xp, and level
+ * Calculates minimum XP required to reach a specific level.
+ * @param {number} level
+ * @returns {number} xp
+ */
+export function getXpForLevel(level) {
+    if (level <= 1) return 0;
+    return Math.pow((level - 1) / 0.1, 2);
+}
+
+/**
+ * Safely retrieves user data from the map, handling migration from legacy number format.
+ * @param {Map} guildMap
+ * @param {string} userId
+ * @returns {object} { explosions, xp, level }
  */
 export function getDataSafe(guildMap, userId) {
-    if (!guildMap.has(userId)) {
-        guildMap.set(userId, { explosions: 0, xp: 0, level: 0 });
+    let val = guildMap.get(userId);
+    if (typeof val === "number") {
+        val = { explosions: val, xp: 0, level: 1 };
+        guildMap.set(userId, val);
     }
-    return guildMap.get(userId);
+    return val || { explosions: 0, xp: 0, level: 1 };
 }

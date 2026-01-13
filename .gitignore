@@ -1,6 +1,5 @@
 node_modules/
 .env
 test/utils.test.js
-utils.js
 data/leaderboard.json
 data/spin.json

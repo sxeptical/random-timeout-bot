@@ -1,5 +1,6 @@
 console.log("Starting bot...");
 import "dotenv/config";
+import { getLevelFromXp, getXpForLevel, getDataSafe } from "./utils.js";
 console.log("dotenv loaded");
 import {
   Client,

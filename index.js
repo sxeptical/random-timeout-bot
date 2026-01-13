@@ -510,7 +510,7 @@ client.once(Events.ClientReady, async () => {
           name: "type",
           description: "What to modify (xp or explosions)",
           type: 3, // STRING
-          required: true, // Changed to required
+          required: false, // Changed to required
           choices: [
             { name: "XP", value: "xp" },
             { name: "Explosions", value: "explosions" },

@@ -1777,7 +1777,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .getString("bet")
         .toLowerCase()
         .trim();
-      const bettingSpace = interaction.options.getString("space");
+      const bettingSpace = interaction.options.getString("space").toLowerCase();
 
       if (!explodedCounts.has(guildId)) explodedCounts.set(guildId, new Map());
       const guildMap = explodedCounts.get(guildId);

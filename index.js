@@ -25,8 +25,8 @@ if (!TOKEN) throw new Error("DISCORD_TOKEN missing in .env");
 
 const WATCH_CHANNELS = process.env.CHANNEL_ALLOW
   ? process.env.CHANNEL_ALLOW.split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
+      .map((s) => s.trim())
+      .filter(Boolean)
   : null;
 const TIMEOUT_MS = Number(process.env.TIMEOUT_MS ?? 10000);
 const CHANCE = Number(process.env.CHANCE ?? 0.05);
@@ -94,7 +94,21 @@ const blackjackGames = new Map();
 
 // Blackjack helper functions
 const CARD_SUITS = ["♠", "♥", "♦", "♣"];
-const CARD_VALUES = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+const CARD_VALUES = [
+  "A",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "10",
+  "J",
+  "Q",
+  "K",
+];
 
 function createDeck() {
   const deck = [];
@@ -152,7 +166,9 @@ async function safeInteractionUpdate(interaction, options) {
   } catch (err) {
     // Error code 10062 = Unknown interaction (token expired)
     if (err.code === 10062) {
-      console.log("Interaction token expired, attempting to edit message directly");
+      console.log(
+        "Interaction token expired, attempting to edit message directly"
+      );
       try {
         // Try to edit the message directly instead
         await interaction.message.edit(options);
@@ -166,7 +182,14 @@ async function safeInteractionUpdate(interaction, options) {
   }
 }
 
-async function handleDealerTurn(interaction, game, guildMap, userId, guildId, sessionKey) {
+async function handleDealerTurn(
+  interaction,
+  game,
+  guildMap,
+  userId,
+  guildId,
+  sessionKey
+) {
   // Dealer draws until 17 or higher
   while (calculateHand(game.dealerHand) < 17) {
     game.dealerHand.push(game.deck.pop());
@@ -174,7 +197,10 @@ async function handleDealerTurn(interaction, game, guildMap, userId, guildId, se
 
   const playerTotal = calculateHand(game.playerHand);
   const dealerTotal = calculateHand(game.dealerHand);
-  const userExplosions = guildMap.get(userId) ?? 0;
+  // Update user's explosions
+  const userId = game.userId ?? interaction.user.id;
+  const userData = getDataSafe(guildMap, userId);
+  const userExplosions = userData.explosions;
 
   blackjackGames.delete(sessionKey);
 
@@ -183,7 +209,8 @@ async function handleDealerTurn(interaction, game, guildMap, userId, guildId, se
   if (dealerTotal > 21) {
     // Dealer busted - player wins
     const winnings = game.bet;
-    guildMap.set(userId, userExplosions + winnings);
+    userData.explosions = userExplosions + winnings;
+    guildMap.set(userId, userData);
     resultTitle = "🃏 Blackjack - YOU WIN!";
     resultDesc = "Dealer busted!";
     resultText = `You won **${winnings}** explosions!`;
@@ -191,7 +218,8 @@ async function handleDealerTurn(interaction, game, guildMap, userId, guildId, se
   } else if (playerTotal > dealerTotal) {
     // Player wins
     const winnings = game.bet;
-    guildMap.set(userId, userExplosions + winnings);
+    userData.explosions = userExplosions + winnings;
+    guildMap.set(userId, userData);
     resultTitle = "🃏 Blackjack - YOU WIN!";
     resultDesc = "You beat the dealer!";
     resultText = `You won **${winnings}** explosions!`;
@@ -199,7 +227,8 @@ async function handleDealerTurn(interaction, game, guildMap, userId, guildId, se
   } else if (dealerTotal > playerTotal) {
     // Dealer wins
     const newTotal = Math.max(0, userExplosions - game.bet);
-    guildMap.set(userId, newTotal);
+    userData.explosions = newTotal;
+    guildMap.set(userId, userData);
     resultTitle = "🃏 Blackjack - YOU LOSE!";
     resultDesc = "Dealer wins!";
     resultText = `You lost **${game.bet}** explosions!`;
@@ -219,8 +248,16 @@ async function handleDealerTurn(interaction, game, guildMap, userId, guildId, se
     .setTitle(resultTitle)
     .setDescription(resultDesc)
     .addFields(
-      { name: "Your Hand", value: `${formatHand(game.playerHand)} (${playerTotal})`, inline: true },
-      { name: "Dealer's Hand", value: `${formatHand(game.dealerHand)} (${dealerTotal})`, inline: true },
+      {
+        name: "Your Hand",
+        value: `${formatHand(game.playerHand)} (${playerTotal})`,
+        inline: true,
+      },
+      {
+        name: "Dealer's Hand",
+        value: `${formatHand(game.dealerHand)} (${dealerTotal})`,
+        inline: true,
+      },
       { name: "Result", value: resultText, inline: false }
     )
     .setColor(resultColor);
@@ -244,9 +281,20 @@ function loadLeaderboard() {
     if (!raw) return;
     const parsed = JSON.parse(raw);
     for (const [guildId, guildObj] of Object.entries(parsed)) {
-      const gmap = new Map(
-        Object.entries(guildObj).map(([k, v]) => [k, Number(v)])
-      );
+      const gmap = new Map();
+      for (const [userId, val] of Object.entries(guildObj)) {
+        // Migration: If value is number, convert to object
+        if (typeof val === "number") {
+          gmap.set(userId, { explosions: val, xp: 0, level: 1 });
+        } else {
+          // Ensure structure
+          gmap.set(userId, {
+            explosions: val.explosions ?? 0,
+            xp: val.xp ?? 0,
+            level: val.level ?? 1,
+          });
+        }
+      }
       explodedCounts.set(guildId, gmap);
     }
     console.log("✅ Loaded leaderboard from", LB_FILE);
@@ -358,6 +406,25 @@ process.on("exit", () => {
   saveSpinData();
 });
 
+// XP Helpers
+function getLevelFromXp(xp) {
+  return Math.floor(0.1 * Math.sqrt(xp)) + 1;
+}
+
+function getXpForLevel(level) {
+  if (level <= 1) return 0;
+  return Math.pow((level - 1) / 0.1, 2);
+}
+
+function getDataSafe(guildMap, userId) {
+  let val = guildMap.get(userId);
+  if (typeof val === "number") {
+    val = { explosions: val, xp: 0, level: 1 };
+    guildMap.set(userId, val);
+  }
+  return val || { explosions: 0, xp: 0, level: 1 };
+}
+
 function recordExplosion(member) {
   try {
     const userId = member?.id ?? member?.user?.id;
@@ -365,7 +432,26 @@ function recordExplosion(member) {
     if (!userId) return;
     if (!explodedCounts.has(guildId)) explodedCounts.set(guildId, new Map());
     const guildMap = explodedCounts.get(guildId);
-    guildMap.set(userId, (guildMap.get(userId) ?? 0) + 1);
+
+    // Get current data (with migration fallback)
+    let userData = getDataSafe(guildMap, userId);
+
+    // Update explosions
+    userData.explosions = (userData.explosions || 0) + 1;
+
+    // XP Gain Logic
+    const xpGain = Math.floor(Math.random() * 31) + 20; // 20 - 50 XP
+    userData.xp = (userData.xp || 0) + xpGain;
+
+    // Check Level Up
+    const newLevel = getLevelFromXp(userData.xp);
+    if (newLevel > userData.level) {
+      userData.level = newLevel;
+      console.log(`[LEVEL UP] User ${userId} reached Level ${newLevel}`);
+    }
+
+    guildMap.set(userId, userData);
+
     // persist to disk (debounced)
     try {
       saveLeaderboardDebounced();
@@ -417,7 +503,8 @@ client.once(Events.ClientReady, async () => {
     },
     {
       name: "spin",
-      description: "Spin the wheel! 50/50 chance for 1 week admin or 1 week timeout (5 spins/month)",
+      description:
+        "Spin the wheel! 50/50 chance for 1 week admin or 1 week timeout (5 spins/month)",
     },
     {
       name: "blackjack",
@@ -433,11 +520,22 @@ client.once(Events.ClientReady, async () => {
     },
     {
       name: "xp",
-      description: "View or change a user's xp.",
+      description: "View or change a user's xp / explosions.",
       options: [
         {
+          name: "type",
+          description: "What to modify (xp or explosions)",
+          type: 3, // STRING
+          required: true, // Changed to required
+          choices: [
+            { name: "XP", value: "xp" },
+            { name: "Explosions", value: "explosions" },
+          ],
+        },
+        {
           name: "username",
-          description: "The username of the user that you'd like to view / edit.",
+          description:
+            "The username of the user that you'd like to view / edit.",
           type: 6, // USER
           required: false,
         },
@@ -504,7 +602,11 @@ function isExempt(member) {
   // exempt server owner
   if (member.guild.ownerId === member.id) return true;
   // exempt users who are currently timed out (immunity until untimedout)
-  if (member.communicationDisabledUntil && member.communicationDisabledUntil > new Date()) return true;
+  if (
+    member.communicationDisabledUntil &&
+    member.communicationDisabledUntil > new Date()
+  )
+    return true;
   // exempt certain roles by name — edit or expand
   const exemptRoleNames = ["Moderator", "Admin", "NoTimeout"];
   for (const r of exemptRoleNames)
@@ -583,7 +685,11 @@ client.on(Events.MessageCreate, async (message) => {
     // Triple explosion chance for banned role
     if (member.roles.cache.has(ROLL_BANNED_ROLE)) {
       timeoutChance = Math.min(1, CHANCE * 3); // Triple chance, cap at 100%
-      console.log(`   🎯 Banned role detected: tripled chance to ${(timeoutChance * 100).toFixed(1)}%`);
+      console.log(
+        `   🎯 Banned role detected: tripled chance to ${(
+          timeoutChance * 100
+        ).toFixed(1)}%`
+      );
     }
 
     for (const [roleIdentifier, chance] of HIGH_CHANCE_ROLES) {
@@ -632,27 +738,38 @@ client.on(Events.MessageCreate, async (message) => {
 client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isAutocomplete()) {
     const focusedOption = interaction.options.getFocused(true);
-    if (interaction.commandName === 'roulette' && focusedOption.name === 'space') {
+    if (
+      interaction.commandName === "roulette" &&
+      focusedOption.name === "space"
+    ) {
       const choices = [
-        "Red", "Black", "Even", "Odd",
-        "1-18", "19-36",
-        "1st 12", "2nd 12", "3rd 12",
-        "0"
+        "Red",
+        "Black",
+        "Even",
+        "Odd",
+        "1-18",
+        "19-36",
+        "1st 12",
+        "2nd 12",
+        "3rd 12",
+        "0",
       ];
       // Add numbers 1-36
       for (let i = 1; i <= 36; i++) choices.push(i.toString());
 
-      const filtered = choices.filter(choice =>
+      const filtered = choices.filter((choice) =>
         choice.toLowerCase().startsWith(focusedOption.value.toLowerCase())
       );
 
       // Limit to 25 choices
       await interaction.respond(
-        filtered.slice(0, 25).map(choice => {
+        filtered.slice(0, 25).map((choice) => {
           let name = choice;
           // Add odds info to name for clarity
-          if (["Red", "Black", "Even", "Odd", "1-18", "19-36"].includes(choice)) name += " (1:1)";
-          else if (["1st 12", "2nd 12", "3rd 12"].includes(choice)) name += " (2:1)";
+          if (["Red", "Black", "Even", "Odd", "1-18", "19-36"].includes(choice))
+            name += " (1:1)";
+          else if (["1st 12", "2nd 12", "3rd 12"].includes(choice))
+            name += " (2:1)";
           else name += " (35:1)"; // Numbers
 
           // Map display name to internal value
@@ -727,7 +844,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           // Debug log
           console.log(
-            `[ROLL COOLDOWN] User ${userId}: charges=${userData.charges
+            `[ROLL COOLDOWN] User ${userId}: charges=${
+              userData.charges
             }, timeSince=${Math.floor(
               timeSinceLastRoll / 1000
             )}s, gained=${chargesGained}, available=${availableCharges}`
@@ -1040,8 +1158,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
       console.log(`rollCooldownEnabled set to: ${enabled}`);
 
       await interaction.editReply({
-        content: `/roll cooldown is now **${enabled ? "ENABLED" : "DISABLED"
-          }**.`,
+        content: `/roll cooldown is now **${
+          enabled ? "ENABLED" : "DISABLED"
+        }**.`,
         flags: MessageFlags.Ephemeral,
       });
     } catch (err) {
@@ -1072,7 +1191,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const guildId = interaction.guild.id;
       const guildMap = explodedCounts.get(guildId) ?? new Map();
       const entries = Array.from(guildMap.entries());
-      entries.sort((a, b) => b[1] - a[1]);
+      entries.sort((a, b) => b[1].xp - a[1].xp); // Sort by XP
 
       if (entries.length === 0) {
         await interaction.editReply({
@@ -1089,7 +1208,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Build leaderboard lines
       const lines = [];
       for (let i = 0; i < slice.length; i++) {
-        const [id, cnt] = slice[i];
+        const [id, userData] = slice[i];
         const rank = startIdx + i + 1;
         let display = `User ${id.slice(-4)}`;
         try {
@@ -1098,19 +1217,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
         } catch (e) {
           // keep fallback
         }
-        lines.push(`**${rank}.** ${display} • 💥 ${cnt.toLocaleString()}`);
+        lines.push(
+          `**${rank}.** ${display} • 💥 ${userData.explosions.toLocaleString()} (Level ${
+            userData.level
+          })`
+        );
       }
 
       // Find user's rank
       const userRank = entries.findIndex(([id]) => id === interaction.user.id);
-      const userRankText = userRank >= 0 ? `Your rank: #${userRank + 1}` : "You have no explosions yet";
+      const userRankText =
+        userRank >= 0
+          ? `Your rank: #${userRank + 1}`
+          : "You have no explosions yet";
 
       // Create embed
       const embed = new EmbedBuilder()
         .setTitle("💣 Leaderboard")
         .setDescription(lines.join("\n"))
         .setColor(0x2b2d31)
-        .setFooter({ text: `Page ${currentPage}/${totalPages} • ${userRankText}` });
+        .setFooter({
+          text: `Page ${currentPage}/${totalPages} • ${userRankText}`,
+        });
 
       // Create pagination buttons
       const row = new ActionRowBuilder().addComponents(
@@ -1145,7 +1273,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
         }
       } catch (e) {
-        console.error("Failed to send error message for /lb:", e);
+        console.error("Failed to send error for /lb:", e);
       }
     }
   } else if (interaction.commandName === "spin") {
@@ -1177,7 +1305,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await interaction.deferReply();
 
       // Spinning animation
-      const spinFrames = ["🎰 Spinning...", "🎰 Spinning..", "🎰 Spinning.", "🎰 Spinning..."];
+      const spinFrames = [
+        "🎰 Spinning...",
+        "🎰 Spinning..",
+        "🎰 Spinning.",
+        "🎰 Spinning...",
+      ];
       for (let i = 0; i < 4; i++) {
         await interaction.editReply(spinFrames[i % spinFrames.length]);
         await new Promise((resolve) => setTimeout(resolve, 500));
@@ -1210,19 +1343,29 @@ client.on(Events.InteractionCreate, async (interaction) => {
               permissions: ["Administrator"],
               reason: "Spin wheel winner role",
             });
-            console.log(`[SPIN] Created "${SPIN_ADMIN_ROLE_NAME}" role in ${interaction.guild.name}`);
+            console.log(
+              `[SPIN] Created "${SPIN_ADMIN_ROLE_NAME}" role in ${interaction.guild.name}`
+            );
           }
 
           // Give the role to the winner
-          await interaction.member.roles.add(spinRole, "Won the spin wheel for 1 week");
+          await interaction.member.roles.add(
+            spinRole,
+            "Won the spin wheel for 1 week"
+          );
 
           // Schedule role removal after 1 week
           setTimeout(async () => {
             try {
               const member = await interaction.guild.members.fetch(userId);
               if (member.roles.cache.has(spinRole.id)) {
-                await member.roles.remove(spinRole, "Spin wheel admin period expired (1 week)");
-                console.log(`[SPIN] Removed admin role from ${member.user.tag} after 1 week`);
+                await member.roles.remove(
+                  spinRole,
+                  "Spin wheel admin period expired (1 week)"
+                );
+                console.log(
+                  `[SPIN] Removed admin role from ${member.user.tag} after 1 week`
+                );
               }
             } catch (e) {
               console.error("[SPIN] Failed to remove role after timeout:", e);
@@ -1278,7 +1421,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       } else {
         // Loser gets 1 week timeout
         try {
-          await interaction.member.timeout(ONE_WEEK_MS, "Lost the spin wheel - 1 week timeout");
+          await interaction.member.timeout(
+            ONE_WEEK_MS,
+            "Lost the spin wheel - 1 week timeout"
+          );
           await interaction.editReply({
             content: `💀 **LOST!** 💀\n\n${interaction.user} spun the wheel and lost! Enjoy your **1 week timeout**! 😈`,
           });
@@ -1314,12 +1460,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const guildId = interaction.guild.id;
       const userId = interaction.user.id;
       const sessionKey = `${guildId}-${userId}`;
-      const betInput = interaction.options.getString("bet").toLowerCase().trim();
+      const betInput = interaction.options
+        .getString("bet")
+        .toLowerCase()
+        .trim();
 
       // Check if user already has an active game
       if (blackjackGames.has(sessionKey)) {
         await interaction.reply({
-          content: "❌ You already have an active blackjack game! Finish it first.",
+          content:
+            "❌ You already have an active blackjack game! Finish it first.",
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -1327,7 +1477,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       // Check if user has enough explosions to bet
       const guildMap = explodedCounts.get(guildId) ?? new Map();
-      const userExplosions = guildMap.get(userId) ?? 0;
+      const userData = getDataSafe(guildMap, userId);
+      const userExplosions = userData.explosions;
 
       // Parse bet amount
       let bet;
@@ -1381,9 +1532,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
             .setTitle("🃏 Blackjack - Push!")
             .setDescription(`Both have Blackjack! It's a tie.`)
             .addFields(
-              { name: "Your Hand", value: `${formatHand(playerHand)} (${playerTotal})`, inline: true },
-              { name: "Dealer's Hand", value: `${formatHand(dealerHand)} (${dealerTotal})`, inline: true },
-              { name: "Result", value: `Bet returned: **${bet}** explosions`, inline: false }
+              {
+                name: "Your Hand",
+                value: `${formatHand(playerHand)} (${playerTotal})`,
+                inline: true,
+              },
+              {
+                name: "Dealer's Hand",
+                value: `${formatHand(dealerHand)} (${dealerTotal})`,
+                inline: true,
+              },
+              {
+                name: "Result",
+                value: `Bet returned: **${bet}** explosions`,
+                inline: false,
+              }
             )
             .setColor(0xffff00);
 
@@ -1391,16 +1554,29 @@ client.on(Events.InteractionCreate, async (interaction) => {
         } else {
           // Player wins 1.5x (blackjack pays 3:2)
           const winnings = Math.floor(bet * 1.5);
-          guildMap.set(userId, userExplosions + winnings);
+          userData.explosions = (userData.explosions || 0) + winnings;
+          guildMap.set(userId, userData);
           saveLeaderboardDebounced();
 
           const embed = new EmbedBuilder()
             .setTitle("🃏 Blackjack - BLACKJACK!")
             .setDescription(`You got a natural Blackjack!`)
             .addFields(
-              { name: "Your Hand", value: `${formatHand(playerHand)} (${playerTotal})`, inline: true },
-              { name: "Dealer's Hand", value: `${formatHand(dealerHand)} (${dealerTotal})`, inline: true },
-              { name: "Result", value: `You won **${winnings}** explosions! (3:2 payout)`, inline: false }
+              {
+                name: "Your Hand",
+                value: `${formatHand(playerHand)} (${playerTotal})`,
+                inline: true,
+              },
+              {
+                name: "Dealer's Hand",
+                value: `${formatHand(dealerHand)} (${dealerTotal})`,
+                inline: true,
+              },
+              {
+                name: "Result",
+                value: `You won **${winnings}** explosions! (3:2 payout)`,
+                inline: false,
+              }
             )
             .setColor(0x00ff00);
 
@@ -1423,11 +1599,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setTitle("🃏 Blackjack")
         .setDescription(`Bet: **${bet}** explosions`)
         .addFields(
-          { name: "Your Hand", value: `${formatHand(playerHand)} (${playerTotal})`, inline: true },
-          { name: "Dealer's Hand", value: `${formatHand(dealerHand, true)}`, inline: true }
+          {
+            name: "Your Hand",
+            value: `${formatHand(playerHand)} (${playerTotal})`,
+            inline: true,
+          },
+          {
+            name: "Dealer's Hand",
+            value: `${formatHand(dealerHand, true)}`,
+            inline: true,
+          }
         )
         .setColor(0x2b2d31)
-        .setFooter({ text: "Hit to draw another card, Stand to end your turn" });
+        .setFooter({
+          text: "Hit to draw another card, Stand to end your turn",
+        });
 
       // Create buttons
       const row = new ActionRowBuilder().addComponents(
@@ -1453,18 +1639,32 @@ client.on(Events.InteractionCreate, async (interaction) => {
               .setTitle("🃏 Blackjack - EXPIRED")
               .setDescription(`Game timed out after 5 minutes of inactivity.`)
               .addFields(
-                { name: "Your Hand", value: `${formatHand(playerHand)} (${playerTotal})`, inline: true },
-                { name: "Dealer's Hand", value: `${formatHand(dealerHand, true)}`, inline: true },
-                { name: "Result", value: `Bet returned: **${bet}** explosions (no penalty)`, inline: false }
+                {
+                  name: "Your Hand",
+                  value: `${formatHand(playerHand)} (${playerTotal})`,
+                  inline: true,
+                },
+                {
+                  name: "Dealer's Hand",
+                  value: `${formatHand(dealerHand, true)}`,
+                  inline: true,
+                },
+                {
+                  name: "Result",
+                  value: `Bet returned: **${bet}** explosions (no penalty)`,
+                  inline: false,
+                }
               )
               .setColor(0x808080);
-            await interaction.editReply({ embeds: [expiredEmbed], components: [] });
+            await interaction.editReply({
+              embeds: [expiredEmbed],
+              components: [],
+            });
           } catch (e) {
             // Interaction may have expired, ignore
           }
         }
       }, 300000); // 5 minutes
-
     } catch (err) {
       console.error("Error in /blackjack command:", err);
       try {
@@ -1486,7 +1686,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
   } else if (interaction.commandName === "xp") {
     try {
       if (!interaction.guild) {
-        await interaction.reply({ content: "This command can only be used in a server.", flags: MessageFlags.Ephemeral });
+        await interaction.reply({
+          content: "This command can only be used in a server.",
+          flags: MessageFlags.Ephemeral,
+        });
         return;
       }
 
@@ -1495,71 +1698,112 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const value = interaction.options.getInteger("value");
       const guildId = interaction.guild.id;
 
+      const type = interaction.options.getString("type") || "xp";
+
       if (!explodedCounts.has(guildId)) explodedCounts.set(guildId, new Map());
       const guildMap = explodedCounts.get(guildId);
+      const userData = getDataSafe(guildMap, targetUser.id);
 
       // Mode: View (No action provided)
       if (!action) {
-         const targetUser = username ?? interaction.user;
-         const xp = guildMap.get(targetUser.id) ?? 0;
-         await interaction.reply({ content: `**${targetUser.username}** has **${xp} explosions**.` });
-         return;
+        if (type === "explosions") {
+          await interaction.reply({
+            content: `**${
+              targetUser.username
+            }** has **${userData.explosions.toLocaleString()} explosions**.`,
+          });
+        } else {
+          await interaction.reply({
+            content: `**${
+              targetUser.username
+            }** has **${userData.xp.toLocaleString()} XP** (Level ${
+              userData.level
+            }).`,
+          });
+        }
+        return;
       }
 
       // Mode: Edit (Action provided)
       // Permission check
-      if (!interaction.member.permissions.has("Administrator") && interaction.user.id !== interaction.guild.ownerId) {
-        await interaction.reply({ content: "You do not have permission to manage explosions.", flags: MessageFlags.Ephemeral });
+      if (
+        !interaction.member.permissions.has("Administrator") &&
+        interaction.user.id !== interaction.guild.ownerId
+      ) {
+        await interaction.reply({
+          content: "You do not have permission to manage stats.",
+          flags: MessageFlags.Ephemeral,
+        });
         return;
       }
 
-      const targetUser = username ?? interaction.user; // Defaults to self if not specified
+      const valToCheck =
+        type === "explosions" ? userData.explosions : userData.xp;
+
       if (value === null) {
-          await interaction.reply({ content: "You must provide a value when performing an action.", flags: MessageFlags.Ephemeral });
-          return;
+        await interaction.reply({
+          content: "You must provide a value when performing an action.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
       }
 
-      const currentXp = guildMap.get(targetUser.id) ?? 0;
-      let newXp = currentXp;
+      let newValue = valToCheck;
       let actionText = "";
 
       if (action === "add") {
-          newXp = currentXp + value;
-          actionText = "added to";
+        newValue = valToCheck + value;
+        actionText = "added to";
       } else if (action === "remove") {
-          newXp = Math.max(0, currentXp - value);
-          actionText = "removed from";
+        newValue = Math.max(0, valToCheck - value);
+        actionText = "removed from";
       } else if (action === "set") {
-          newXp = Math.max(0, value);
-          actionText = "set for";
+        newValue = Math.max(0, value);
+        actionText = "set for";
       }
 
-      guildMap.set(targetUser.id, newXp);
+      if (type === "explosions") {
+        userData.explosions = newValue;
+      } else {
+        userData.xp = newValue;
+        userData.level = getLevelFromXp(newValue);
+      }
+
+      guildMap.set(targetUser.id, userData);
       saveLeaderboardDebounced();
 
       // Create a summary embed
       const embed = new EmbedBuilder()
         .setTitle("Explosions Update")
-        .setDescription(`Successfully ${actionText} **${targetUser.username}**.\n\n**Old Explosions:** ${currentXp}\n**New Explosions:** ${newXp}`)
+        .setDescription(
+          `Successfully ${actionText} **${targetUser.username}**'s ${type}.\n\n**New ${type}:** ${newValue}`
+        )
         .setColor(0x00ff00)
         .setTimestamp();
-      
-      await interaction.reply({ embeds: [embed] });
 
+      await interaction.reply({ embeds: [embed] });
     } catch (err) {
       console.error("Error in /xp:", err);
-      if (!interaction.replied) await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+      if (!interaction.replied)
+        await interaction.reply({
+          content: "An error occurred.",
+          flags: MessageFlags.Ephemeral,
+        });
     }
   } else if (interaction.commandName === "roulette") {
     try {
       const guildId = interaction.guild.id;
       const userId = interaction.user.id;
-      const betInput = interaction.options.getString("bet").toLowerCase().trim();
+      const betInput = interaction.options
+        .getString("bet")
+        .toLowerCase()
+        .trim();
       const bettingSpace = interaction.options.getString("space");
 
       if (!explodedCounts.has(guildId)) explodedCounts.set(guildId, new Map());
       const guildMap = explodedCounts.get(guildId);
-      const userExplosions = guildMap.get(userId) ?? 0;
+      const userData = getDataSafe(guildMap, userId);
+      const userExplosions = userData.explosions;
 
       // Parse bet amount
       let bet;
@@ -1596,9 +1840,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       // Spin the wheel (0-36)
       const number = Math.floor(Math.random() * 37);
-      
-      const ROULETTE_RED = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
-      const ROULETTE_BLACK = [2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35];
+
+      const ROULETTE_RED = [
+        1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36,
+      ];
+      const ROULETTE_BLACK = [
+        2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35,
+      ];
 
       let color = "green";
       let colorEmoji = "🟢";
@@ -1615,95 +1863,153 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       switch (bettingSpace) {
         case "red":
-          if (color === "red") { won = true; multiplier = 1; }
+          if (color === "red") {
+            won = true;
+            multiplier = 1;
+          }
           break;
         case "black":
-          if (color === "black") { won = true; multiplier = 1; }
+          if (color === "black") {
+            won = true;
+            multiplier = 1;
+          }
           break;
         case "even":
-          if (number !== 0 && number % 2 === 0) { won = true; multiplier = 1; }
+          if (number !== 0 && number % 2 === 0) {
+            won = true;
+            multiplier = 1;
+          }
           break;
         case "odd":
-          if (number !== 0 && number % 2 !== 0) { won = true; multiplier = 1; }
+          if (number !== 0 && number % 2 !== 0) {
+            won = true;
+            multiplier = 1;
+          }
           break;
         case "1-18":
-          if (number >= 1 && number <= 18) { won = true; multiplier = 1; }
+          if (number >= 1 && number <= 18) {
+            won = true;
+            multiplier = 1;
+          }
           break;
         case "19-36":
-          if (number >= 19 && number <= 36) { won = true; multiplier = 1; }
+          if (number >= 19 && number <= 36) {
+            won = true;
+            multiplier = 1;
+          }
           break;
         case "1-12":
-          if (number >= 1 && number <= 12) { won = true; multiplier = 2; }
+          if (number >= 1 && number <= 12) {
+            won = true;
+            multiplier = 2;
+          }
           break;
         case "13-24":
-          if (number >= 13 && number <= 24) { won = true; multiplier = 2; }
+          if (number >= 13 && number <= 24) {
+            won = true;
+            multiplier = 2;
+          }
           break;
         case "25-36":
-          if (number >= 25 && number <= 36) { won = true; multiplier = 2; }
+          if (number >= 25 && number <= 36) {
+            won = true;
+            multiplier = 2;
+          }
           break;
         case "0":
-          if (number === 0) { won = true; multiplier = 35; }
+          if (number === 0) {
+            won = true;
+            multiplier = 35;
+          }
           break;
         default:
           const num = parseInt(bettingSpace);
           if (!isNaN(num) && num >= 1 && num <= 36) {
-             if (number === num) { won = true; multiplier = 35; }
+            if (number === num) {
+              won = true;
+              multiplier = 35;
+            }
           }
           break;
       }
 
       let resultTitle, resultDesc, resultColor;
-      
+
       if (won) {
         const winnings = bet * multiplier;
         // Logic: if multiplier is 1 (e.g. Red), you win 1x bet. Total added = winnings.
-        
-        guildMap.set(userId, userExplosions + winnings);
-        
+
+        userData.explosions = (userData.explosions || 0) + winnings;
+        guildMap.set(userId, userData);
+
         resultTitle = "🎰 Roulette - WIN!";
         resultDesc = `The ball landed on **${number}** ${colorEmoji}!`;
         resultColor = 0x00ff00;
-        
+
         await interaction.editReply({
-          embeds: [new EmbedBuilder()
-            .setTitle(resultTitle)
-            .setDescription(resultDesc)
-            .addFields(
-              { name: "Your Bet", value: `${bet} on ${bettingSpace}`, inline: true },
-              { name: "Result", value: `You won **${winnings}** explosions!`, inline: true }
-            )
-            .setColor(resultColor)
-          ]
+          embeds: [
+            new EmbedBuilder()
+              .setTitle(resultTitle)
+              .setDescription(resultDesc)
+              .addFields(
+                {
+                  name: "Your Bet",
+                  value: `${bet} on ${bettingSpace}`,
+                  inline: true,
+                },
+                {
+                  name: "Result",
+                  value: `You won **${winnings}** explosions!`,
+                  inline: true,
+                }
+              )
+              .setColor(resultColor),
+          ],
         });
       } else {
         // Lost
-        guildMap.set(userId, Math.max(0, userExplosions - bet));
-        
+        userData.explosions = Math.max(0, (userData.explosions || 0) - bet);
+        guildMap.set(userId, userData);
+
         resultTitle = "🎰 Roulette - LOSE";
         resultDesc = `The ball landed on **${number}** ${colorEmoji}!`;
         resultColor = 0xff0000;
-        
+
         await interaction.editReply({
-          embeds: [new EmbedBuilder()
-            .setTitle(resultTitle)
-            .setDescription(resultDesc)
-            .addFields(
-              { name: "Your Bet", value: `${bet} on ${bettingSpace}`, inline: true },
-              { name: "Result", value: `You lost **${bet}** explosions.`, inline: true }
-            )
-            .setColor(resultColor)
-          ]
+          embeds: [
+            new EmbedBuilder()
+              .setTitle(resultTitle)
+              .setDescription(resultDesc)
+              .addFields(
+                {
+                  name: "Your Bet",
+                  value: `${bet} on ${bettingSpace}`,
+                  inline: true,
+                },
+                {
+                  name: "Result",
+                  value: `You lost **${bet}** explosions.`,
+                  inline: true,
+                }
+              )
+              .setColor(resultColor),
+          ],
         });
       }
 
       saveLeaderboardDebounced();
-
     } catch (err) {
       console.error("Error in /roulette:", err);
       if (!interaction.replied && !interaction.deferred) {
-        await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+        await interaction.reply({
+          content: "An error occurred.",
+          flags: MessageFlags.Ephemeral,
+        });
       } else {
-        await interaction.followUp({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+        await interaction.followUp({
+          content: "An error occurred.",
+          flags: MessageFlags.Ephemeral,
+        });
       }
     }
   }
@@ -1714,7 +2020,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isButton()) return;
 
   // Handle leaderboard pagination buttons
-  if (interaction.customId.startsWith("lb_prev_") || interaction.customId.startsWith("lb_next_")) {
+  if (
+    interaction.customId.startsWith("lb_prev_") ||
+    interaction.customId.startsWith("lb_next_")
+  ) {
     try {
       const parts = interaction.customId.split("_");
       const direction = parts[1]; // "prev" or "next"
@@ -1727,7 +2036,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Get leaderboard data
       const guildMap = explodedCounts.get(guildId) ?? new Map();
       const entries = Array.from(guildMap.entries());
-      entries.sort((a, b) => b[1] - a[1]);
+      entries.sort((a, b) => b[1].xp - a[1].xp); // Sort by XP (Level)
 
       const totalPages = Math.ceil(entries.length / perPage);
       const validPage = Math.max(1, Math.min(newPage, totalPages));
@@ -1737,7 +2046,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Build leaderboard lines
       const lines = [];
       for (let i = 0; i < slice.length; i++) {
-        const [id, cnt] = slice[i];
+        const [id, userData] = slice[i];
         const rank = startIdx + i + 1;
         let display = `User ${id.slice(-4)}`;
         try {
@@ -1746,19 +2055,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
         } catch (e) {
           // keep fallback
         }
-        lines.push(`**${rank}.** ${display} • 💥 ${cnt.toLocaleString()}`);
+        lines.push(
+          `**${rank}.** ${display} • **Level ${
+            userData.level
+          }** (${userData.xp.toLocaleString()} XP) • 💥 ${userData.explosions.toLocaleString()}`
+        );
       }
 
       // Find user's rank
       const userRank = entries.findIndex(([id]) => id === interaction.user.id);
-      const userRankText = userRank >= 0 ? `Your rank: #${userRank + 1}` : "You have no explosions yet";
+      const userRankText =
+        userRank >= 0
+          ? `Your rank: #${userRank + 1}`
+          : "You have no explosions yet";
 
       // Create embed
       const embed = new EmbedBuilder()
         .setTitle("💣 Leaderboard")
         .setDescription(lines.join("\n"))
         .setColor(0x2b2d31)
-        .setFooter({ text: `Page ${validPage}/${totalPages} • ${userRankText}` });
+        .setFooter({
+          text: `Page ${validPage}/${totalPages} • ${userRankText}`,
+        });
 
       // Create pagination buttons
       const row = new ActionRowBuilder().addComponents(
@@ -1785,7 +2103,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   // Handle blackjack buttons
-  if (interaction.customId.startsWith("bj_hit_") || interaction.customId.startsWith("bj_stand_")) {
+  if (
+    interaction.customId.startsWith("bj_hit_") ||
+    interaction.customId.startsWith("bj_stand_")
+  ) {
     try {
       const parts = interaction.customId.split("_");
       const action = parts[1]; // "hit" or "stand"
@@ -1824,34 +2145,69 @@ client.on(Events.InteractionCreate, async (interaction) => {
           blackjackGames.delete(sessionKey);
           const newTotal = Math.max(0, userExplosions - game.bet);
           guildMap.set(targetUserId, newTotal);
-          if (!explodedCounts.has(guildId)) explodedCounts.set(guildId, guildMap);
+          if (!explodedCounts.has(guildId))
+            explodedCounts.set(guildId, guildMap);
           saveLeaderboardDebounced();
 
           const embed = new EmbedBuilder()
             .setTitle("🃏 Blackjack - BUST!")
             .setDescription(`You went over 21!`)
             .addFields(
-              { name: "Your Hand", value: `${formatHand(game.playerHand)} (${playerTotal})`, inline: true },
-              { name: "Dealer's Hand", value: `${formatHand(game.dealerHand)} (${calculateHand(game.dealerHand)})`, inline: true },
-              { name: "Result", value: `You lost **${game.bet}** explosions!`, inline: false }
+              {
+                name: "Your Hand",
+                value: `${formatHand(game.playerHand)} (${playerTotal})`,
+                inline: true,
+              },
+              {
+                name: "Dealer's Hand",
+                value: `${formatHand(game.dealerHand)} (${calculateHand(
+                  game.dealerHand
+                )})`,
+                inline: true,
+              },
+              {
+                name: "Result",
+                value: `You lost **${game.bet}** explosions!`,
+                inline: false,
+              }
             )
             .setColor(0xff0000);
 
-          await safeInteractionUpdate(interaction, { embeds: [embed], components: [] });
+          await safeInteractionUpdate(interaction, {
+            embeds: [embed],
+            components: [],
+          });
         } else if (playerTotal === 21) {
           // Player has 21, auto-stand
-          await handleDealerTurn(interaction, game, guildMap, targetUserId, guildId, sessionKey);
+          await handleDealerTurn(
+            interaction,
+            game,
+            guildMap,
+            targetUserId,
+            guildId,
+            sessionKey
+          );
         } else {
           // Continue playing
           const embed = new EmbedBuilder()
             .setTitle("🃏 Blackjack")
             .setDescription(`Bet: **${game.bet}** explosions`)
             .addFields(
-              { name: "Your Hand", value: `${formatHand(game.playerHand)} (${playerTotal})`, inline: true },
-              { name: "Dealer's Hand", value: `${formatHand(game.dealerHand, true)}`, inline: true }
+              {
+                name: "Your Hand",
+                value: `${formatHand(game.playerHand)} (${playerTotal})`,
+                inline: true,
+              },
+              {
+                name: "Dealer's Hand",
+                value: `${formatHand(game.dealerHand, true)}`,
+                inline: true,
+              }
             )
             .setColor(0x2b2d31)
-            .setFooter({ text: "Hit to draw another card, Stand to end your turn" });
+            .setFooter({
+              text: "Hit to draw another card, Stand to end your turn",
+            });
 
           const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -1864,24 +2220,41 @@ client.on(Events.InteractionCreate, async (interaction) => {
               .setStyle(ButtonStyle.Secondary)
           );
 
-          await safeInteractionUpdate(interaction, { embeds: [embed], components: [row] });
+          await safeInteractionUpdate(interaction, {
+            embeds: [embed],
+            components: [row],
+          });
         }
       } else if (action === "stand") {
-        await handleDealerTurn(interaction, game, guildMap, targetUserId, guildId, sessionKey);
+        await handleDealerTurn(
+          interaction,
+          game,
+          guildMap,
+          targetUserId,
+          guildId,
+          sessionKey
+        );
       }
     } catch (err) {
       // Don't log "Unknown interaction" errors as they're expected when tokens expire
       if (err.code !== 10062) {
         console.error("Error handling blackjack buttons:", err);
       } else {
-        console.log(`Blackjack interaction expired for user ${interaction.user?.tag || 'unknown'}`);
+        console.log(
+          `Blackjack interaction expired for user ${
+            interaction.user?.tag || "unknown"
+          }`
+        );
       }
     }
     return;
   }
 
   // Handle spin buttons
-  if (interaction.customId.startsWith("spin_double_") || interaction.customId.startsWith("spin_keep_")) {
+  if (
+    interaction.customId.startsWith("spin_double_") ||
+    interaction.customId.startsWith("spin_keep_")
+  ) {
     const parts = interaction.customId.split("_");
     const action = parts[1]; // "double" or "keep"
     const guildId = parts[2];
@@ -1940,13 +2313,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
             // Cancel the 1-week removal and schedule 2-week removal instead
             setTimeout(async () => {
               try {
-                const member = await interaction.guild.members.fetch(targetUserId);
+                const member = await interaction.guild.members.fetch(
+                  targetUserId
+                );
                 if (member.roles.cache.has(spinRole.id)) {
-                  await member.roles.remove(spinRole, "Spin wheel admin period expired (2 weeks)");
-                  console.log(`[SPIN] Removed admin role from ${member.user.tag} after 2 weeks`);
+                  await member.roles.remove(
+                    spinRole,
+                    "Spin wheel admin period expired (2 weeks)"
+                  );
+                  console.log(
+                    `[SPIN] Removed admin role from ${member.user.tag} after 2 weeks`
+                  );
                 }
               } catch (e) {
-                console.error("[SPIN] Failed to remove role after 2-week timeout:", e);
+                console.error(
+                  "[SPIN] Failed to remove role after 2-week timeout:",
+                  e
+                );
               }
             }, TWO_WEEKS_MS);
           }
@@ -1954,7 +2337,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.editReply({
             content: `🎉🎉 **JACKPOT!** 🎉🎉\n\n${interaction.user} went double or nothing and **WON**! They now have **2 WEEKS of Admin**! 🏆`,
           });
-          console.log(`[SPIN] ${interaction.user.tag} WON double or nothing - 2 weeks admin`);
+          console.log(
+            `[SPIN] ${interaction.user.tag} WON double or nothing - 2 weeks admin`
+          );
         } catch (err) {
           console.error("[SPIN] Error extending admin:", err);
         }
@@ -1966,15 +2351,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
           );
 
           if (spinRole && interaction.member.roles.cache.has(spinRole.id)) {
-            await interaction.member.roles.remove(spinRole, "Lost double or nothing");
+            await interaction.member.roles.remove(
+              spinRole,
+              "Lost double or nothing"
+            );
           }
 
-          await interaction.member.timeout(TWO_WEEKS_MS, "Lost double or nothing - 2 week timeout");
+          await interaction.member.timeout(
+            TWO_WEEKS_MS,
+            "Lost double or nothing - 2 week timeout"
+          );
 
           await interaction.editReply({
             content: `💀💀 **BUSTED!** 💀💀\n\n${interaction.user} went double or nothing and **LOST EVERYTHING**! Enjoy your **2 WEEKS TIMEOUT**! 😈😈`,
           });
-          console.log(`[SPIN] ${interaction.user.tag} LOST double or nothing - 2 weeks timeout`);
+          console.log(
+            `[SPIN] ${interaction.user.tag} LOST double or nothing - 2 weeks timeout`
+          );
         } catch (err) {
           console.error("[SPIN] Error applying double loss:", err);
           await interaction.editReply({

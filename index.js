@@ -26,8 +26,8 @@ if (!TOKEN) throw new Error("DISCORD_TOKEN missing in .env");
 
 const WATCH_CHANNELS = process.env.CHANNEL_ALLOW
   ? process.env.CHANNEL_ALLOW.split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
+      .map((s) => s.trim())
+      .filter(Boolean)
   : null;
 const TIMEOUT_MS = Number(process.env.TIMEOUT_MS ?? 10000);
 const CHANCE = Number(process.env.CHANCE ?? 0.05);
@@ -850,7 +850,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           // Debug log
           console.log(
-            `[ROLL COOLDOWN] User ${userId}: charges=${userData.charges
+            `[ROLL COOLDOWN] User ${userId}: charges=${
+              userData.charges
             }, timeSince=${Math.floor(
               timeSinceLastRoll / 1000,
             )}s, gained=${chargesGained}, available=${availableCharges}`,
@@ -1163,8 +1164,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
       console.log(`rollCooldownEnabled set to: ${enabled}`);
 
       await interaction.editReply({
-        content: `/roll cooldown is now **${enabled ? "ENABLED" : "DISABLED"
-          }**.`,
+        content: `/roll cooldown is now **${
+          enabled ? "ENABLED" : "DISABLED"
+        }**.`,
         flags: MessageFlags.Ephemeral,
       });
     } catch (err) {
@@ -1228,34 +1230,27 @@ client.on(Events.InteractionCreate, async (interaction) => {
         } catch (e) {
           // keep fallback
         }
-<<<<<<< HEAD
-        lines.push(
-          `**${rank}.** ${display} • 💥 ${userData.explosions.toLocaleString()} (Level ${
-            userData.level
-          })`,
-        );
-=======
         if (lbType === "explosions") {
           lines.push(
-            `**${rank}.** ${display} • 💥 ${userData.explosions.toLocaleString()}`
+            `**${rank}.** ${display} • 💥 ${userData.explosions.toLocaleString()}`,
           );
         } else {
           lines.push(
-            `**${rank}.** ${display} • **Level ${userData.level}** (${userData.xp.toLocaleString()} XP)`
+            `**${rank}.** ${display} • **Level ${userData.level}** (${userData.xp.toLocaleString()} XP)`,
           );
         }
->>>>>>> fff59630d1eafac80b2efd19222621332932cfbe
       }
 
       // Find user's rank
       const userRank = entries.findIndex(([id]) => id === interaction.user.id);
       const userRankText =
-        userRank >= 0
-          ? `Your rank: #${userRank + 1}`
-          : "You have no data yet";
+        userRank >= 0 ? `Your rank: #${userRank + 1}` : "You have no data yet";
 
       // Create embed
-      const title = lbType === "explosions" ? "💥 Explosions Leaderboard" : "⭐ XP Leaderboard";
+      const title =
+        lbType === "explosions"
+          ? "💥 Explosions Leaderboard"
+          : "⭐ XP Leaderboard";
       const embed = new EmbedBuilder()
         .setTitle(title)
         .setDescription(lines.join("\n"))
@@ -1733,14 +1728,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (!action) {
         if (type === "explosions") {
           await interaction.reply({
-            content: `**${targetUser.username
-              }** has **${userData.explosions.toLocaleString()} explosions**.`,
+            content: `**${
+              targetUser.username
+            }** has **${userData.explosions.toLocaleString()} explosions**.`,
           });
         } else {
           await interaction.reply({
-            content: `**${targetUser.username
-              }** has **${userData.xp.toLocaleString()} XP** (Level ${userData.level
-              }).`,
+            content: `**${
+              targetUser.username
+            }** has **${userData.xp.toLocaleString()} XP** (Level ${
+              userData.level
+            }).`,
           });
         }
         return;
@@ -2084,34 +2082,27 @@ client.on(Events.InteractionCreate, async (interaction) => {
         } catch (e) {
           // keep fallback
         }
-<<<<<<< HEAD
-        lines.push(
-          `**${rank}.** ${display} • **Level ${
-            userData.level
-          }** (${userData.xp.toLocaleString()} XP) • 💥 ${userData.explosions.toLocaleString()}`,
-        );
-=======
         if (lbType === "explosions") {
           lines.push(
-            `**${rank}.** ${display} • 💥 ${userData.explosions.toLocaleString()}`
+            `**${rank}.** ${display} • 💥 ${userData.explosions.toLocaleString()}`,
           );
         } else {
           lines.push(
-            `**${rank}.** ${display} • **Level ${userData.level}** (${userData.xp.toLocaleString()} XP)`
+            `**${rank}.** ${display} • **Level ${userData.level}** (${userData.xp.toLocaleString()} XP)`,
           );
         }
->>>>>>> fff59630d1eafac80b2efd19222621332932cfbe
       }
 
       // Find user's rank
       const userRank = entries.findIndex(([id]) => id === interaction.user.id);
       const userRankText =
-        userRank >= 0
-          ? `Your rank: #${userRank + 1}`
-          : "You have no data yet";
+        userRank >= 0 ? `Your rank: #${userRank + 1}` : "You have no data yet";
 
       // Create embed
-      const title = lbType === "explosions" ? "💥 Explosions Leaderboard" : "⭐ XP Leaderboard";
+      const title =
+        lbType === "explosions"
+          ? "💥 Explosions Leaderboard"
+          : "⭐ XP Leaderboard";
       const embed = new EmbedBuilder()
         .setTitle(title)
         .setDescription(lines.join("\n"))
@@ -2284,14 +2275,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         console.error("Error handling blackjack buttons:", err);
       } else {
         console.log(
-<<<<<<< HEAD
-          `Blackjack interaction expired for user ${
-            interaction.user?.tag || "unknown"
-          }`,
-=======
-          `Blackjack interaction expired for user ${interaction.user?.tag || "unknown"
-          }`
->>>>>>> fff59630d1eafac80b2efd19222621332932cfbe
+          `Blackjack interaction expired for user ${interaction.user?.tag || "unknown"}`,
         );
       }
     }

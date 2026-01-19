@@ -26,8 +26,8 @@ if (!TOKEN) throw new Error("DISCORD_TOKEN missing in .env");
 
 const WATCH_CHANNELS = process.env.CHANNEL_ALLOW
   ? process.env.CHANNEL_ALLOW.split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
+    .map((s) => s.trim())
+    .filter(Boolean)
   : null;
 const TIMEOUT_MS = Number(process.env.TIMEOUT_MS ?? 10000);
 const CHANCE = Number(process.env.CHANCE ?? 0.05);
@@ -490,6 +490,16 @@ client.once(Events.ClientReady, async () => {
       description: "Show the leaderboard of who got exploded the most",
       options: [
         {
+          name: "type",
+          description: "Leaderboard type (xp or explosions)",
+          type: 3, // STRING
+          required: false,
+          choices: [
+            { name: "XP / Level", value: "xp" },
+            { name: "Explosions", value: "explosions" },
+          ],
+        },
+        {
           name: "page",
           description: "Page number to view (default 1)",
           type: 4, // INTEGER
@@ -840,8 +850,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           // Debug log
           console.log(
-            `[ROLL COOLDOWN] User ${userId}: charges=${
-              userData.charges
+            `[ROLL COOLDOWN] User ${userId}: charges=${userData.charges
             }, timeSince=${Math.floor(
               timeSinceLastRoll / 1000,
             )}s, gained=${chargesGained}, available=${availableCharges}`,
@@ -1154,9 +1163,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       console.log(`rollCooldownEnabled set to: ${enabled}`);
 
       await interaction.editReply({
-        content: `/roll cooldown is now **${
-          enabled ? "ENABLED" : "DISABLED"
-        }**.`,
+        content: `/roll cooldown is now **${enabled ? "ENABLED" : "DISABLED"
+          }**.`,
         flags: MessageFlags.Ephemeral,
       });
     } catch (err) {
@@ -1181,13 +1189,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
     try {
       await interaction.deferReply();
       const page = interaction.options.getInteger("page") ?? 1;
+      const lbType = interaction.options.getString("type") ?? "xp";
       const perPage = 10;
 
       // Use guild-specific leaderboard
       const guildId = interaction.guild.id;
       const guildMap = explodedCounts.get(guildId) ?? new Map();
       const entries = Array.from(guildMap.entries());
-      entries.sort((a, b) => b[1].xp - a[1].xp); // Sort by XP
+
+      // Sort based on type
+      if (lbType === "explosions") {
+        entries.sort((a, b) => b[1].explosions - a[1].explosions);
+      } else {
+        entries.sort((a, b) => b[1].xp - a[1].xp);
+      }
 
       if (entries.length === 0) {
         await interaction.editReply({
@@ -1213,11 +1228,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
         } catch (e) {
           // keep fallback
         }
+<<<<<<< HEAD
         lines.push(
           `**${rank}.** ${display} • 💥 ${userData.explosions.toLocaleString()} (Level ${
             userData.level
           })`,
         );
+=======
+        if (lbType === "explosions") {
+          lines.push(
+            `**${rank}.** ${display} • 💥 ${userData.explosions.toLocaleString()}`
+          );
+        } else {
+          lines.push(
+            `**${rank}.** ${display} • **Level ${userData.level}** (${userData.xp.toLocaleString()} XP)`
+          );
+        }
+>>>>>>> fff59630d1eafac80b2efd19222621332932cfbe
       }
 
       // Find user's rank
@@ -1225,26 +1252,27 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const userRankText =
         userRank >= 0
           ? `Your rank: #${userRank + 1}`
-          : "You have no explosions yet";
+          : "You have no data yet";
 
       // Create embed
+      const title = lbType === "explosions" ? "💥 Explosions Leaderboard" : "⭐ XP Leaderboard";
       const embed = new EmbedBuilder()
-        .setTitle("💣 Leaderboard")
+        .setTitle(title)
         .setDescription(lines.join("\n"))
         .setColor(0x2b2d31)
         .setFooter({
           text: `Page ${currentPage}/${totalPages} • ${userRankText}`,
         });
 
-      // Create pagination buttons
+      // Create pagination buttons (include type in customId)
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-          .setCustomId(`lb_prev_${guildId}_${currentPage}`)
+          .setCustomId(`lb_prev_${guildId}_${currentPage}_${lbType}`)
           .setLabel("Previous Page")
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(currentPage <= 1),
         new ButtonBuilder()
-          .setCustomId(`lb_next_${guildId}_${currentPage}`)
+          .setCustomId(`lb_next_${guildId}_${currentPage}_${lbType}`)
           .setLabel("Next Page")
           .setStyle(ButtonStyle.Primary)
           .setDisabled(currentPage >= totalPages),
@@ -1705,17 +1733,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (!action) {
         if (type === "explosions") {
           await interaction.reply({
-            content: `**${
-              targetUser.username
-            }** has **${userData.explosions.toLocaleString()} explosions**.`,
+            content: `**${targetUser.username
+              }** has **${userData.explosions.toLocaleString()} explosions**.`,
           });
         } else {
           await interaction.reply({
-            content: `**${
-              targetUser.username
-            }** has **${userData.xp.toLocaleString()} XP** (Level ${
-              userData.level
-            }).`,
+            content: `**${targetUser.username
+              }** has **${userData.xp.toLocaleString()} XP** (Level ${userData.level
+              }).`,
           });
         }
         return;
@@ -1795,7 +1820,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .getString("bet")
         .toLowerCase()
         .trim();
-      const bettingSpace = interaction.options.getString("space");
+      const bettingSpace = interaction.options.getString("space").toLowerCase();
 
       if (!explodedCounts.has(guildId)) explodedCounts.set(guildId, new Map());
       const guildMap = explodedCounts.get(guildId);
@@ -2026,6 +2051,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const direction = parts[1]; // "prev" or "next"
       const guildId = parts[2];
       const currentPage = parseInt(parts[3]);
+      const lbType = parts[4] || "xp"; // Get type from button, default to xp
 
       const newPage = direction === "next" ? currentPage + 1 : currentPage - 1;
       const perPage = 10;
@@ -2033,7 +2059,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Get leaderboard data
       const guildMap = explodedCounts.get(guildId) ?? new Map();
       const entries = Array.from(guildMap.entries());
-      entries.sort((a, b) => b[1].xp - a[1].xp); // Sort by XP (Level)
+
+      // Sort based on type
+      if (lbType === "explosions") {
+        entries.sort((a, b) => b[1].explosions - a[1].explosions);
+      } else {
+        entries.sort((a, b) => b[1].xp - a[1].xp);
+      }
 
       const totalPages = Math.ceil(entries.length / perPage);
       const validPage = Math.max(1, Math.min(newPage, totalPages));
@@ -2052,11 +2084,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
         } catch (e) {
           // keep fallback
         }
+<<<<<<< HEAD
         lines.push(
           `**${rank}.** ${display} • **Level ${
             userData.level
           }** (${userData.xp.toLocaleString()} XP) • 💥 ${userData.explosions.toLocaleString()}`,
         );
+=======
+        if (lbType === "explosions") {
+          lines.push(
+            `**${rank}.** ${display} • 💥 ${userData.explosions.toLocaleString()}`
+          );
+        } else {
+          lines.push(
+            `**${rank}.** ${display} • **Level ${userData.level}** (${userData.xp.toLocaleString()} XP)`
+          );
+        }
+>>>>>>> fff59630d1eafac80b2efd19222621332932cfbe
       }
 
       // Find user's rank
@@ -2064,26 +2108,27 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const userRankText =
         userRank >= 0
           ? `Your rank: #${userRank + 1}`
-          : "You have no explosions yet";
+          : "You have no data yet";
 
       // Create embed
+      const title = lbType === "explosions" ? "💥 Explosions Leaderboard" : "⭐ XP Leaderboard";
       const embed = new EmbedBuilder()
-        .setTitle("💣 Leaderboard")
+        .setTitle(title)
         .setDescription(lines.join("\n"))
         .setColor(0x2b2d31)
         .setFooter({
           text: `Page ${validPage}/${totalPages} • ${userRankText}`,
         });
 
-      // Create pagination buttons
+      // Create pagination buttons (include type)
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-          .setCustomId(`lb_prev_${guildId}_${validPage}`)
+          .setCustomId(`lb_prev_${guildId}_${validPage}_${lbType}`)
           .setLabel("Previous Page")
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(validPage <= 1),
         new ButtonBuilder()
-          .setCustomId(`lb_next_${guildId}_${validPage}`)
+          .setCustomId(`lb_next_${guildId}_${validPage}_${lbType}`)
           .setLabel("Next Page")
           .setStyle(ButtonStyle.Primary)
           .setDisabled(validPage >= totalPages),
@@ -2239,9 +2284,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
         console.error("Error handling blackjack buttons:", err);
       } else {
         console.log(
+<<<<<<< HEAD
           `Blackjack interaction expired for user ${
             interaction.user?.tag || "unknown"
           }`,
+=======
+          `Blackjack interaction expired for user ${interaction.user?.tag || "unknown"
+          }`
+>>>>>>> fff59630d1eafac80b2efd19222621332932cfbe
         );
       }
     }

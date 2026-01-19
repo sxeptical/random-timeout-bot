@@ -45,3 +45,15 @@ test("getDataSafe returns existing object", () => {
   const data = getDataSafe(map, "userExisting");
   assert.deepStrictEqual(data, existing);
 });
+
+test("getDataSafe sanitizes NaN values", () => {
+  const map = new Map();
+  // Simulate corrupt data
+  const corrupt = { explosions: NaN, xp: NaN, level: NaN };
+  map.set("userCorrupt", corrupt);
+
+  const data = getDataSafe(map, "userCorrupt");
+  assert.strictEqual(data.explosions, 0);
+  assert.strictEqual(data.xp, 0);
+  assert.strictEqual(data.level, 1);
+});

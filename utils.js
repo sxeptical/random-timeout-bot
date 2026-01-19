@@ -26,9 +26,31 @@ export function getXpForLevel(level) {
  */
 export function getDataSafe(guildMap, userId) {
   let val = guildMap.get(userId);
+
+  // Handle legacy number format (or if map somehow stores a number)
   if (typeof val === "number") {
-    val = { explosions: val, xp: 0, level: 1 };
+    val = { explosions: isNaN(val) ? 0 : val, xp: 0, level: 1 };
     guildMap.set(userId, val);
   }
-  return val || { explosions: 0, xp: 0, level: 1 };
+
+  // Handle null/undefined or incomplete objects
+  if (!val) {
+    const newUser = { explosions: 0, xp: 0, level: 1 };
+    // Only set if it was explicitly requested? No, we just return default.
+    // Usually usage implies we want to modify or read.
+    return newUser;
+  }
+
+  // Sanitize properties to prevent NaN propagation
+  if (typeof val.explosions !== "number" || isNaN(val.explosions)) {
+    val.explosions = 0;
+  }
+  if (typeof val.xp !== "number" || isNaN(val.xp)) {
+    val.xp = 0;
+  }
+  if (typeof val.level !== "number" || isNaN(val.level)) {
+    val.level = 1;
+  }
+
+  return val;
 }

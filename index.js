@@ -168,7 +168,7 @@ async function safeInteractionUpdate(interaction, options) {
     // Error code 10062 = Unknown interaction (token expired)
     if (err.code === 10062) {
       console.log(
-        "Interaction token expired, attempting to edit message directly"
+        "Interaction token expired, attempting to edit message directly",
       );
       try {
         // Try to edit the message directly instead
@@ -189,7 +189,7 @@ async function handleDealerTurn(
   guildMap,
   userId,
   guildId,
-  sessionKey
+  sessionKey,
 ) {
   // Dealer draws until 17 or higher
   while (calculateHand(game.dealerHand) < 17) {
@@ -259,7 +259,7 @@ async function handleDealerTurn(
         value: `${formatHand(game.dealerHand)} (${dealerTotal})`,
         inline: true,
       },
-      { name: "Result", value: resultText, inline: false }
+      { name: "Result", value: resultText, inline: false },
     )
     .setColor(resultColor);
 
@@ -284,15 +284,27 @@ function loadLeaderboard() {
     for (const [guildId, guildObj] of Object.entries(parsed)) {
       const gmap = new Map();
       for (const [userId, val] of Object.entries(guildObj)) {
+        if (val === null || val === undefined) continue;
+
         // Migration: If value is number, convert to object
         if (typeof val === "number") {
-          gmap.set(userId, { explosions: val, xp: 0, level: 1 });
-        } else {
-          // Ensure structure
           gmap.set(userId, {
-            explosions: val.explosions ?? 0,
-            xp: val.xp ?? 0,
-            level: val.level ?? 1,
+            explosions: isNaN(val) ? 0 : val,
+            xp: 0,
+            level: 1,
+          });
+        } else {
+          // Ensure structure and sanitize matches
+          gmap.set(userId, {
+            explosions:
+              typeof val.explosions === "number" && !isNaN(val.explosions)
+                ? val.explosions
+                : 0,
+            xp: typeof val.xp === "number" && !isNaN(val.xp) ? val.xp : 0,
+            level:
+              typeof val.level === "number" && !isNaN(val.level)
+                ? val.level
+                : 1,
           });
         }
       }
@@ -639,18 +651,18 @@ client.on(Events.MessageCreate, async (message) => {
     // Debug logging
     console.log(`\n🎯 Attempting timeout for ${member.user.tag}`);
     console.log(
-      `   Bot's highest role: ${botMember.roles.highest.name} (position: ${botMember.roles.highest.position})`
+      `   Bot's highest role: ${botMember.roles.highest.name} (position: ${botMember.roles.highest.position})`,
     );
     console.log(
-      `   Target's highest role: ${member.roles.highest.name} (position: ${member.roles.highest.position})`
+      `   Target's highest role: ${member.roles.highest.name} (position: ${member.roles.highest.position})`,
     );
     console.log(
       `   Bot has ModerateMembers: ${botMember.permissions.has(
-        "ModerateMembers"
-      )}`
+        "ModerateMembers",
+      )}`,
     );
     console.log(
-      `   Bot has Administrator: ${botMember.permissions.has("Administrator")}`
+      `   Bot has Administrator: ${botMember.permissions.has("Administrator")}`,
     );
     console.log(`   Target is owner: ${member.guild.ownerId === member.id}`);
 
@@ -672,7 +684,7 @@ client.on(Events.MessageCreate, async (message) => {
       console.log(
         `   🎯 Banned role detected: tripled chance to ${(
           timeoutChance * 100
-        ).toFixed(1)}%`
+        ).toFixed(1)}%`,
       );
     }
 
@@ -680,14 +692,14 @@ client.on(Events.MessageCreate, async (message) => {
       // Check by both role name and role ID
       if (
         member.roles.cache.some(
-          (role) => role.name === roleIdentifier || role.id === roleIdentifier
+          (role) => role.name === roleIdentifier || role.id === roleIdentifier,
         )
       ) {
         timeoutChance = Math.max(timeoutChance, chance); // Use highest chance if multiple roles
         console.log(
           `   🎲 Higher chance detected (${roleIdentifier}): ${(
             chance * 100
-          ).toFixed(1)}%`
+          ).toFixed(1)}%`,
         );
         break;
       }
@@ -707,7 +719,7 @@ client.on(Events.MessageCreate, async (message) => {
       // reply with ephemeral-ish fun message (public)
       await message.channel.send(`${member}, Boom! `);
       console.log(
-        `Timed out ${member.user.tag} for ${durSeconds}s in ${message.guild.name}/${message.channel.name}`
+        `Timed out ${member.user.tag} for ${durSeconds}s in ${message.guild.name}/${message.channel.name}`,
       );
     } catch (err) {
       console.error("Failed to timeout member:", err.message);
@@ -742,7 +754,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       for (let i = 1; i <= 36; i++) choices.push(i.toString());
 
       const filtered = choices.filter((choice) =>
-        choice.toLowerCase().startsWith(focusedOption.value.toLowerCase())
+        choice.toLowerCase().startsWith(focusedOption.value.toLowerCase()),
       );
 
       // Limit to 25 choices
@@ -763,7 +775,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           else if (choice === "3rd 12") value = "25-36";
 
           return { name, value };
-        })
+        }),
       );
     }
     return;
@@ -823,7 +835,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           availableCharges = Math.min(
             MAX_ROLL_CHARGES,
-            userData.charges + chargesGained
+            userData.charges + chargesGained,
           );
 
           // Debug log
@@ -831,19 +843,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
             `[ROLL COOLDOWN] User ${userId}: charges=${
               userData.charges
             }, timeSince=${Math.floor(
-              timeSinceLastRoll / 1000
-            )}s, gained=${chargesGained}, available=${availableCharges}`
+              timeSinceLastRoll / 1000,
+            )}s, gained=${chargesGained}, available=${availableCharges}`,
           );
         } else {
           // New user starts with 1 charge
           availableCharges = 1;
           console.log(
-            `[ROLL COOLDOWN] New user ${userId}: starting with ${availableCharges} charge`
+            `[ROLL COOLDOWN] New user ${userId}: starting with ${availableCharges} charge`,
           );
         }
 
         console.log(
-          `[ROLL COOLDOWN] User ${userId} attempting roll with ${availableCharges} charges available`
+          `[ROLL COOLDOWN] User ${userId} attempting roll with ${availableCharges} charges available`,
         );
 
         if (availableCharges <= 0) {
@@ -902,11 +914,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
           // Only target online/idle/dnd members (not offline)
           // if (!member.presence || member.presence.status === 'offline') return false;
           return true;
-        }
+        },
       );
 
       console.log(
-        `[ROLL DEBUG] Total cached members: ${interaction.guild.members.cache.size}, Eligible: ${eligibleMembers.size}`
+        `[ROLL DEBUG] Total cached members: ${interaction.guild.members.cache.size}, Eligible: ${eligibleMembers.size}`,
       );
 
       if (eligibleMembers.size === 0) {
@@ -943,18 +955,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
           if (!isExempt(commandUser) && canTimeout(botMember, commandUser)) {
             await commandUser.timeout(
               rollTimeoutMs,
-              `Rolled a 1 - exploded themselves!`
+              `Rolled a 1 - exploded themselves!`,
             );
             recordExplosion(commandUser);
             await interaction.followUp(
-              `💥 Oops! ${commandUser} rolled a **1** and exploded themselves! 😂`
+              `💥 Oops! ${commandUser} rolled a **1** and exploded themselves! 😂`,
             );
             console.log(
-              `[ROLL] ${interaction.user.tag} rolled a 1 and exploded themselves`
+              `[ROLL] ${interaction.user.tag} rolled a 1 and exploded themselves`,
             );
           } else {
             await interaction.followUp(
-              `🍀 ${commandUser} got lucky! They rolled a **1** but have immunity!`
+              `🍀 ${commandUser} got lucky! They rolled a **1** but have immunity!`,
             );
           }
         }
@@ -967,14 +979,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const targetMember = eligibleArray[0];
             await targetMember.timeout(
               rollTimeoutMs,
-              `Rolled a 6 by /roll command`
+              `Rolled a 6 by /roll command`,
             );
             recordExplosion(targetMember);
             await interaction.followUp(
-              `💥💥 ${targetMember} got DOUBLE exploded (Not enough people for 2 timeouts)`
+              `💥💥 ${targetMember} got DOUBLE exploded (Not enough people for 2 timeouts)`,
             );
             console.log(
-              `[ROLL] ${interaction.user.tag} rolled a 6 and exploded ${targetMember.user.tag}`
+              `[ROLL] ${interaction.user.tag} rolled a 6 and exploded ${targetMember.user.tag}`,
             );
           } else {
             // Pick two different random people
@@ -990,19 +1002,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
             await firstMember.timeout(
               rollTimeoutMs,
-              `Rolled a 6 by /roll command (victim 1)`
+              `Rolled a 6 by /roll command (victim 1)`,
             );
             recordExplosion(firstMember);
             await secondMember.timeout(
               rollTimeoutMs,
-              `Rolled a 6 by /roll command (victim 2)`
+              `Rolled a 6 by /roll command (victim 2)`,
             );
             recordExplosion(secondMember);
             await interaction.followUp(
-              `💥💥 DOUBLE KILL! ${firstMember} and ${secondMember} both got exploded!`
+              `💥💥 DOUBLE KILL! ${firstMember} and ${secondMember} both got exploded!`,
             );
             console.log(
-              `[ROLL] ${interaction.user.tag} rolled a 6 and exploded ${firstMember.user.tag} and ${secondMember.user.tag}`
+              `[ROLL] ${interaction.user.tag} rolled a 6 and exploded ${firstMember.user.tag} and ${secondMember.user.tag}`,
             );
           }
         }
@@ -1014,12 +1026,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           await targetMember.timeout(
             rollTimeoutMs,
-            `Rolled a ${diceRoll} by /roll command`
+            `Rolled a ${diceRoll} by /roll command`,
           );
           recordExplosion(targetMember);
           await interaction.followUp(`💥 ${targetMember} got exploded!`);
           console.log(
-            `[ROLL] ${interaction.user.tag} rolled a ${diceRoll} and exploded ${targetMember.user.tag})`
+            `[ROLL] ${interaction.user.tag} rolled a ${diceRoll} and exploded ${targetMember.user.tag})`,
           );
         }
 
@@ -1031,29 +1043,29 @@ client.on(Events.InteractionCreate, async (interaction) => {
               eligibleArray[Math.floor(Math.random() * eligibleArray.length)];
             try {
               await unluckyMember.kick(
-                "ULTRA RARE EVENT: 1 in a million roll!"
+                "ULTRA RARE EVENT: 1 in a million roll!",
               );
               await interaction.followUp(
-                `🌟✨💀 **ULTRA RARE EVENT!** 🌟✨💀\n${unluckyMember.user.tag} just hit the 1 IN A MILLION chance and got KICKED from the server! 😱`
+                `🌟✨💀 **ULTRA RARE EVENT!** 🌟✨💀\n${unluckyMember.user.tag} just hit the 1 IN A MILLION chance and got KICKED from the server! 😱`,
               );
               console.log(
-                `[ULTRA RARE] ${interaction.user.tag} triggered 1 in a million event - kicked ${unluckyMember.user.tag}`
+                `[ULTRA RARE] ${interaction.user.tag} triggered 1 in a million event - kicked ${unluckyMember.user.tag}`,
               );
 
               // Try to DM them the invite after kicking
               try {
                 await unluckyMember.send(
-                  `You just hit the 1 IN A MILLION chance in ${interaction.guild.name}! 😱\nHere's the invite to rejoin: https://discord.gg/P8ZQZRjw29`
+                  `You just hit the 1 IN A MILLION chance in ${interaction.guild.name}! 😱\nHere's the invite to rejoin: https://discord.gg/P8ZQZRjw29`,
                 );
               } catch (dmErr) {
                 console.log(
-                  `Couldn't DM ${unluckyMember.user.tag} - they have DMs disabled or left mutual servers`
+                  `Couldn't DM ${unluckyMember.user.tag} - they have DMs disabled or left mutual servers`,
                 );
               }
             } catch (err) {
               console.error(
                 `Failed to kick ${unluckyMember.user.tag}:`,
-                err.message
+                err.message,
               );
             }
           }
@@ -1061,10 +1073,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         // 0.2% chance to send an image and timeout everyone for 15 seconds
         else if (Math.random() < 0.002) {
           await interaction.followUp(
-            "https://media.discordapp.net/attachments/1423201741931024396/1442538744941907988/image.jpg?ex=692bbb25&is=692a69a5&hm=2b4933660848107d82e2d15eb2522e12d44d30b849a339a9625b7b306202fd7f&=&format=webp"
+            "https://media.discordapp.net/attachments/1423201741931024396/1442538744941907988/image.jpg?ex=692bbb25&is=692a69a5&hm=2b4933660848107d82e2d15eb2522e12d44d30b849a339a9625b7b306202fd7f&=&format=webp",
           );
           await interaction.followUp(
-            `${interaction.user.tag} launched a nuke and exploded everyone!`
+            `${interaction.user.tag} launched a nuke and exploded everyone!`,
           );
 
           // Timeout all eligible members for 15 seconds
@@ -1074,7 +1086,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
               if (isExempt(member)) return false;
               if (!canTimeout(botMember, member)) return false;
               return true;
-            }
+            },
           );
 
           let timeoutCount = 0;
@@ -1086,7 +1098,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             } catch (err) {
               console.error(
                 `Failed to timeout ${member.user.tag}:`,
-                err.message
+                err.message,
               );
             }
           }
@@ -1204,7 +1216,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         lines.push(
           `**${rank}.** ${display} • 💥 ${userData.explosions.toLocaleString()} (Level ${
             userData.level
-          })`
+          })`,
         );
       }
 
@@ -1235,7 +1247,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setCustomId(`lb_next_${guildId}_${currentPage}`)
           .setLabel("Next Page")
           .setStyle(ButtonStyle.Primary)
-          .setDisabled(currentPage >= totalPages)
+          .setDisabled(currentPage >= totalPages),
       );
 
       await interaction.editReply({
@@ -1317,7 +1329,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         try {
           // Find or create the spin winner role
           let spinRole = interaction.guild.roles.cache.find(
-            (r) => r.name === SPIN_ADMIN_ROLE_NAME
+            (r) => r.name === SPIN_ADMIN_ROLE_NAME,
           );
 
           if (!spinRole) {
@@ -1328,14 +1340,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
               reason: "Spin wheel winner role",
             });
             console.log(
-              `[SPIN] Created "${SPIN_ADMIN_ROLE_NAME}" role in ${interaction.guild.name}`
+              `[SPIN] Created "${SPIN_ADMIN_ROLE_NAME}" role in ${interaction.guild.name}`,
             );
           }
 
           // Give the role to the winner
           await interaction.member.roles.add(
             spinRole,
-            "Won the spin wheel for 1 week"
+            "Won the spin wheel for 1 week",
           );
 
           // Schedule role removal after 1 week
@@ -1345,10 +1357,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
               if (member.roles.cache.has(spinRole.id)) {
                 await member.roles.remove(
                   spinRole,
-                  "Spin wheel admin period expired (1 week)"
+                  "Spin wheel admin period expired (1 week)",
                 );
                 console.log(
-                  `[SPIN] Removed admin role from ${member.user.tag} after 1 week`
+                  `[SPIN] Removed admin role from ${member.user.tag} after 1 week`,
                 );
               }
             } catch (e) {
@@ -1371,7 +1383,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             new ButtonBuilder()
               .setCustomId(`spin_keep_${guildId}_${userId}`)
               .setLabel("✅ Keep 1 Week Admin")
-              .setStyle(ButtonStyle.Success)
+              .setStyle(ButtonStyle.Success),
           );
 
           await interaction.editReply({
@@ -1407,7 +1419,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         try {
           await interaction.member.timeout(
             ONE_WEEK_MS,
-            "Lost the spin wheel - 1 week timeout"
+            "Lost the spin wheel - 1 week timeout",
           );
           await interaction.editReply({
             content: `💀 **LOST!** 💀\n\n${interaction.user} spun the wheel and lost! Enjoy your **1 week timeout**! 😈`,
@@ -1530,7 +1542,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 name: "Result",
                 value: `Bet returned: **${bet}** explosions`,
                 inline: false,
-              }
+              },
             )
             .setColor(0xffff00);
 
@@ -1560,7 +1572,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 name: "Result",
                 value: `You won **${winnings}** explosions! (3:2 payout)`,
                 inline: false,
-              }
+              },
             )
             .setColor(0x00ff00);
 
@@ -1592,7 +1604,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             name: "Dealer's Hand",
             value: `${formatHand(dealerHand, true)}`,
             inline: true,
-          }
+          },
         )
         .setColor(0x2b2d31)
         .setFooter({
@@ -1608,7 +1620,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         new ButtonBuilder()
           .setCustomId(`bj_stand_${guildId}_${userId}`)
           .setLabel("Stand")
-          .setStyle(ButtonStyle.Secondary)
+          .setStyle(ButtonStyle.Secondary),
       );
 
       await interaction.editReply({ embeds: [embed], components: [row] });
@@ -1637,7 +1649,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   name: "Result",
                   value: `Bet returned: **${bet}** explosions (no penalty)`,
                   inline: false,
-                }
+                },
               )
               .setColor(0x808080);
             await interaction.editReply({
@@ -1761,7 +1773,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const embed = new EmbedBuilder()
         .setTitle("Explosions Update")
         .setDescription(
-          `Successfully ${actionText} **${targetUser.username}**'s ${type}.\n\n**New ${type}:** ${newValue}`
+          `Successfully ${actionText} **${targetUser.username}**'s ${type}.\n\n**New ${type}:** ${newValue}`,
         )
         .setColor(0x00ff00)
         .setTimestamp();
@@ -1946,7 +1958,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   name: "Result",
                   value: `You won **${winnings}** explosions!`,
                   inline: true,
-                }
+                },
               )
               .setColor(resultColor),
           ],
@@ -1975,7 +1987,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   name: "Result",
                   value: `You lost **${bet}** explosions.`,
                   inline: true,
-                }
+                },
               )
               .setColor(resultColor),
           ],
@@ -2043,7 +2055,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         lines.push(
           `**${rank}.** ${display} • **Level ${
             userData.level
-          }** (${userData.xp.toLocaleString()} XP) • 💥 ${userData.explosions.toLocaleString()}`
+          }** (${userData.xp.toLocaleString()} XP) • 💥 ${userData.explosions.toLocaleString()}`,
         );
       }
 
@@ -2074,7 +2086,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setCustomId(`lb_next_${guildId}_${validPage}`)
           .setLabel("Next Page")
           .setStyle(ButtonStyle.Primary)
-          .setDisabled(validPage >= totalPages)
+          .setDisabled(validPage >= totalPages),
       );
 
       await interaction.update({
@@ -2118,7 +2130,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       const guildMap = explodedCounts.get(guildId) ?? new Map();
-      const userExplosions = guildMap.get(targetUserId) ?? 0;
+      let userData = getDataSafe(guildMap, targetUserId);
+      const userExplosions = userData.explosions;
 
       if (action === "hit") {
         // Draw a card
@@ -2128,8 +2141,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (playerTotal > 21) {
           // Player busted!
           blackjackGames.delete(sessionKey);
-          const newTotal = Math.max(0, userExplosions - game.bet);
-          guildMap.set(targetUserId, newTotal);
+          userData.explosions = Math.max(0, userExplosions - game.bet);
+          guildMap.set(targetUserId, userData);
           if (!explodedCounts.has(guildId))
             explodedCounts.set(guildId, guildMap);
           saveLeaderboardDebounced();
@@ -2146,7 +2159,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
               {
                 name: "Dealer's Hand",
                 value: `${formatHand(game.dealerHand)} (${calculateHand(
-                  game.dealerHand
+                  game.dealerHand,
                 )})`,
                 inline: true,
               },
@@ -2154,7 +2167,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 name: "Result",
                 value: `You lost **${game.bet}** explosions!`,
                 inline: false,
-              }
+              },
             )
             .setColor(0xff0000);
 
@@ -2170,7 +2183,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             guildMap,
             targetUserId,
             guildId,
-            sessionKey
+            sessionKey,
           );
         } else {
           // Continue playing
@@ -2187,7 +2200,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 name: "Dealer's Hand",
                 value: `${formatHand(game.dealerHand, true)}`,
                 inline: true,
-              }
+              },
             )
             .setColor(0x2b2d31)
             .setFooter({
@@ -2202,7 +2215,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             new ButtonBuilder()
               .setCustomId(`bj_stand_${guildId}_${targetUserId}`)
               .setLabel("Stand")
-              .setStyle(ButtonStyle.Secondary)
+              .setStyle(ButtonStyle.Secondary),
           );
 
           await safeInteractionUpdate(interaction, {
@@ -2217,7 +2230,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           guildMap,
           targetUserId,
           guildId,
-          sessionKey
+          sessionKey,
         );
       }
     } catch (err) {
@@ -2228,7 +2241,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         console.log(
           `Blackjack interaction expired for user ${
             interaction.user?.tag || "unknown"
-          }`
+          }`,
         );
       }
     }
@@ -2291,29 +2304,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
         try {
           // Find the spin role
           const spinRole = interaction.guild.roles.cache.find(
-            (r) => r.name === SPIN_ADMIN_ROLE_NAME
+            (r) => r.name === SPIN_ADMIN_ROLE_NAME,
           );
 
           if (spinRole) {
             // Cancel the 1-week removal and schedule 2-week removal instead
             setTimeout(async () => {
               try {
-                const member = await interaction.guild.members.fetch(
-                  targetUserId
-                );
+                const member =
+                  await interaction.guild.members.fetch(targetUserId);
                 if (member.roles.cache.has(spinRole.id)) {
                   await member.roles.remove(
                     spinRole,
-                    "Spin wheel admin period expired (2 weeks)"
+                    "Spin wheel admin period expired (2 weeks)",
                   );
                   console.log(
-                    `[SPIN] Removed admin role from ${member.user.tag} after 2 weeks`
+                    `[SPIN] Removed admin role from ${member.user.tag} after 2 weeks`,
                   );
                 }
               } catch (e) {
                 console.error(
                   "[SPIN] Failed to remove role after 2-week timeout:",
-                  e
+                  e,
                 );
               }
             }, TWO_WEEKS_MS);
@@ -2323,7 +2335,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             content: `🎉🎉 **JACKPOT!** 🎉🎉\n\n${interaction.user} went double or nothing and **WON**! They now have **2 WEEKS of Admin**! 🏆`,
           });
           console.log(
-            `[SPIN] ${interaction.user.tag} WON double or nothing - 2 weeks admin`
+            `[SPIN] ${interaction.user.tag} WON double or nothing - 2 weeks admin`,
           );
         } catch (err) {
           console.error("[SPIN] Error extending admin:", err);
@@ -2332,26 +2344,26 @@ client.on(Events.InteractionCreate, async (interaction) => {
         // Lost double - remove admin and apply 2 week timeout
         try {
           const spinRole = interaction.guild.roles.cache.find(
-            (r) => r.name === SPIN_ADMIN_ROLE_NAME
+            (r) => r.name === SPIN_ADMIN_ROLE_NAME,
           );
 
           if (spinRole && interaction.member.roles.cache.has(spinRole.id)) {
             await interaction.member.roles.remove(
               spinRole,
-              "Lost double or nothing"
+              "Lost double or nothing",
             );
           }
 
           await interaction.member.timeout(
             TWO_WEEKS_MS,
-            "Lost double or nothing - 2 week timeout"
+            "Lost double or nothing - 2 week timeout",
           );
 
           await interaction.editReply({
             content: `💀💀 **BUSTED!** 💀💀\n\n${interaction.user} went double or nothing and **LOST EVERYTHING**! Enjoy your **2 WEEKS TIMEOUT**! 😈😈`,
           });
           console.log(
-            `[SPIN] ${interaction.user.tag} LOST double or nothing - 2 weeks timeout`
+            `[SPIN] ${interaction.user.tag} LOST double or nothing - 2 weeks timeout`,
           );
         } catch (err) {
           console.error("[SPIN] Error applying double loss:", err);

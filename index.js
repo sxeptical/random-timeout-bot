@@ -435,16 +435,8 @@ function recordExplosion(member) {
     // Update explosions
     userData.explosions = (userData.explosions || 0) + 1;
 
-    // XP Gain Logic
-    const xpGain = Math.floor(Math.random() * 31) + 20; // 20 - 50 XP
-    userData.xp = (userData.xp || 0) + xpGain;
 
-    // Check Level Up
-    const newLevel = getLevelFromXp(userData.xp);
-    if (newLevel > userData.level) {
-      userData.level = newLevel;
-      console.log(`[LEVEL UP] User ${userId} reached Level ${newLevel}`);
-    }
+    // XP gain removed from explosion event
 
     guildMap.set(userId, userData);
 
@@ -794,6 +786,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   if (interaction.commandName === "roll") {
+        // XP Gain Logic: Award XP on command use
+        const guildId = interaction.guild?.id ?? "global";
+        if (!explodedCounts.has(guildId)) explodedCounts.set(guildId, new Map());
+        const guildMap = explodedCounts.get(guildId);
+        let userData = getDataSafe(guildMap, userId);
+        const xpGain = Math.floor(Math.random() * 31) + 20; // 20 - 50 XP
+        userData.xp = (userData.xp || 0) + xpGain;
+        // Check Level Up
+        const newLevel = getLevelFromXp(userData.xp);
+        if (newLevel > userData.level) {
+          userData.level = newLevel;
+          console.log(`[LEVEL UP] User ${userId} reached Level ${newLevel}`);
+        }
+        guildMap.set(userId, userData);
+        try {
+          saveLeaderboardDebounced();
+        } catch (e) {
+          console.error("Save debounce failed:", e);
+        }
     try {
       const botMember = interaction.guild.members.me;
 

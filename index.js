@@ -1,7 +1,5 @@
-console.log("Starting bot...");
 import "dotenv/config";
 import { getLevelFromXp, getXpForLevel, getDataSafe } from "./utils.js";
-console.log("dotenv loaded");
 import {
   Client,
   GatewayIntentBits,
@@ -16,12 +14,11 @@ import {
   ButtonStyle,
   EmbedBuilder,
 } from "discord.js";
-console.log("discord.js imported");
 import fs from "fs";
+import { readFile, writeFile, mkdir, rename } from "fs/promises";
 import path from "path";
 
 const TOKEN = process.env.DISCORD_TOKEN;
-console.log("TOKEN exists:", !!TOKEN);
 if (!TOKEN) throw new Error("DISCORD_TOKEN missing in .env");
 
 const WATCH_CHANNELS = process.env.CHANNEL_ALLOW
@@ -32,9 +29,33 @@ const WATCH_CHANNELS = process.env.CHANNEL_ALLOW
 const TIMEOUT_MS = Number(process.env.TIMEOUT_MS ?? 10000);
 const CHANCE = Number(process.env.CHANCE ?? 0.05);
 const COOLDOWN_MS = Number(process.env.COOLDOWN_MS ?? 30000);
-const ROLL_COOLDOWN_MS = 3600000; // 1 hour cooldown for /roll command
-const MAX_ROLL_CHARGES = 3; // Maximum stacked roll charges
-const ROLL_BANNED_ROLE = "1444727845065588837"; // Role banned from /roll with tripled explosion chance
+const ROLL_COOLDOWN_MS = Number(process.env.ROLL_COOLDOWN_MS ?? 3600000); // 1 hour cooldown for /roll command
+const MAX_ROLL_CHARGES = Number(process.env.MAX_ROLL_CHARGES ?? 3); // Maximum stacked roll charges
+const ROLL_BANNED_ROLE = process.env.ROLL_BANNED_ROLE ?? ""; // Role banned from /roll with tripled explosion chance
+const REJOIN_INVITE_URL = process.env.REJOIN_INVITE_URL ?? ""; // Invite URL for kicked users to rejoin
+
+// Logging utility - set LOG_LEVEL in .env (debug, info, warn, error)
+const LOG_LEVEL = process.env.LOG_LEVEL ?? "info";
+const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
+const logger = {
+  debug: (...args) => LOG_LEVELS[LOG_LEVEL] <= 0 && console.log("[DEBUG]", ...args),
+  info: (...args) => LOG_LEVELS[LOG_LEVEL] <= 1 && console.log("[INFO]", ...args),
+  warn: (...args) => LOG_LEVELS[LOG_LEVEL] <= 2 && console.warn("[WARN]", ...args),
+  error: (...args) => LOG_LEVELS[LOG_LEVEL] <= 3 && console.error("[ERROR]", ...args),
+};
+
+// Time constants (replacing magic numbers)
+const ONE_MINUTE_MS = 60 * 1000;
+const FIVE_MINUTES_MS = 5 * 60 * 1000;
+const THIRTY_MINUTES_MS = 30 * 60 * 1000;
+const ONE_HOUR_MS = 60 * 60 * 1000;
+const MASS_TIMEOUT_DURATION_MS = 15 * 1000; // 15 seconds for mass timeout event
+const SPIN_DECISION_TIMEOUT_MS = ONE_MINUTE_MS; // 1 minute to decide on double-or-nothing
+const BLACKJACK_GAME_TIMEOUT_MS = FIVE_MINUTES_MS; // 5 minutes before game expires
+const ANIMATION_DELAY_MS = 500; // Delay for spinning animations
+const SUSPENSE_DELAY_MS = 1000; // Delay for building suspense
+const DOUBLE_OR_NOTHING_DELAY_MS = 1500; // Delay before double-or-nothing result
+const LEADERBOARD_PAGE_SIZE = 10; // Number of entries per leaderboard page
 
 // Parse high chance roles (format: RoleNameOrID:0.5,AnotherRoleOrID:0.75)
 // Supports both role names and role IDs
@@ -73,9 +94,11 @@ const explodedCounts = new Map();
 // ---- Persistence: JSON file storage ----
 const DATA_DIR = path.join(process.cwd(), "data");
 const LB_FILE = path.join(DATA_DIR, "leaderboard.json");
+const SCHEDULED_FILE = path.join(DATA_DIR, "scheduled.json");
 const SAVE_DEBOUNCE_MS = 2000; // debounce writes
 let _saveTimer = null;
 let _spinSaveTimer = null;
+let _scheduledSaveTimer = null;
 
 // Spin Wheel Constants
 const SPIN_FILE = path.join(DATA_DIR, "spin.json");
@@ -83,6 +106,11 @@ const SPIN_ADMIN_ROLE_NAME = "Spin Winner"; // Role name for spin winners
 const MAX_SPINS_PER_MONTH = 5; // Max 5 people can spin per month
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
+
+// Scheduled events: Array<{ id, type, guildId, userId, roleId, executeAt, data }>
+// Persisted to disk to survive restarts
+const scheduledEvents = [];
+let _scheduledTimers = new Map(); // Map<eventId, timerId>
 
 // Spin data: Map<guildId, { month: "YYYY-MM", users: [{ id, timestamp, result }] }>
 const spinData = new Map();
@@ -148,7 +176,6 @@ function calculateHand(hand) {
 }
 
 function formatCard(card) {
-  const redSuits = ["♥", "♦"];
   return `${card.value}${card.suit}`;
 }
 
@@ -167,20 +194,97 @@ async function safeInteractionUpdate(interaction, options) {
   } catch (err) {
     // Error code 10062 = Unknown interaction (token expired)
     if (err.code === 10062) {
-      console.log(
-        "Interaction token expired, attempting to edit message directly",
-      );
+      logger.debug("Interaction token expired, attempting to edit message directly");
       try {
         // Try to edit the message directly instead
         await interaction.message.edit(options);
         return true;
       } catch (editErr) {
-        console.error("Failed to edit message directly:", editErr.message);
+        logger.warn("Failed to edit message directly:", editErr.message);
         return false;
       }
     }
     throw err; // Re-throw other errors
   }
+}
+
+// Helper function to build leaderboard embed and buttons (DRY)
+async function buildLeaderboardEmbed(guild, guildId, page, lbType, userId) {
+  const guildMap = explodedCounts.get(guildId) ?? new Map();
+  const entries = Array.from(guildMap.entries());
+
+  // Sort based on type
+  if (lbType === "explosions") {
+    entries.sort((a, b) => b[1].explosions - a[1].explosions);
+  } else {
+    entries.sort((a, b) => b[1].xp - a[1].xp);
+  }
+
+  if (entries.length === 0) {
+    return { empty: true };
+  }
+
+  const totalPages = Math.ceil(entries.length / LEADERBOARD_PAGE_SIZE);
+  const currentPage = Math.max(1, Math.min(page, totalPages));
+  const startIdx = (currentPage - 1) * LEADERBOARD_PAGE_SIZE;
+  const slice = entries.slice(startIdx, startIdx + LEADERBOARD_PAGE_SIZE);
+
+  // Build leaderboard lines
+  const lines = [];
+  for (let i = 0; i < slice.length; i++) {
+    const [id, userData] = slice[i];
+    const rank = startIdx + i + 1;
+    let display = `User ${id.slice(-4)}`;
+    try {
+      const member = await guild.members.fetch(id);
+      display = member.displayName;
+    } catch (e) {
+      // keep fallback
+    }
+    if (lbType === "explosions") {
+      lines.push(
+        `**${rank}.** ${display} • 💥 ${userData.explosions.toLocaleString()}`,
+      );
+    } else {
+      lines.push(
+        `**${rank}.** ${display} • **Level ${userData.level}** (${userData.xp.toLocaleString()} XP)`,
+      );
+    }
+  }
+
+  // Find user's rank
+  const userRank = entries.findIndex(([id]) => id === userId);
+  const userRankText =
+    userRank >= 0 ? `Your rank: #${userRank + 1}` : "You have no data yet";
+
+  // Create embed
+  const title =
+    lbType === "explosions"
+      ? "💥 Explosions Leaderboard"
+      : "⭐ XP Leaderboard";
+  const embed = new EmbedBuilder()
+    .setTitle(title)
+    .setDescription(lines.join("\n"))
+    .setColor(0x2b2d31)
+    .setFooter({
+      text: `Page ${currentPage}/${totalPages} • ${userRankText}`,
+    });
+
+  // Create pagination buttons (include type in customId)
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`lb_prev_${guildId}_${currentPage}_${lbType}`)
+      .setLabel("Previous Page")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(currentPage <= 1),
+    new ButtonBuilder()
+      .setCustomId(`lb_next_${guildId}_${currentPage}_${lbType}`)
+      .setLabel("Next Page")
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(currentPage >= totalPages),
+  );
+
+  return { embed, row, empty: false };
 }
 
 async function handleDealerTurn(
@@ -266,19 +370,19 @@ async function handleDealerTurn(
   await safeInteractionUpdate(interaction, { embeds: [embed], components: [] });
 }
 
-function ensureDataDir() {
+async function ensureDataDir() {
   try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+    await mkdir(DATA_DIR, { recursive: true });
   } catch (e) {
     /* ignore */
   }
 }
 
-function loadLeaderboard() {
+async function loadLeaderboard() {
   try {
-    ensureDataDir();
+    await ensureDataDir();
     if (!fs.existsSync(LB_FILE)) return;
-    const raw = fs.readFileSync(LB_FILE, "utf8");
+    const raw = await readFile(LB_FILE, "utf8");
     if (!raw) return;
     const parsed = JSON.parse(raw);
     for (const [guildId, guildObj] of Object.entries(parsed)) {
@@ -310,73 +414,203 @@ function loadLeaderboard() {
       }
       explodedCounts.set(guildId, gmap);
     }
-    console.log("✅ Loaded leaderboard from", LB_FILE);
+    logger.info("✅ Loaded leaderboard from", LB_FILE);
   } catch (e) {
-    console.error("Failed to load leaderboard:", e);
+    logger.error("Failed to load leaderboard:", e);
   }
 }
 
-function saveLeaderboard() {
+async function saveLeaderboard() {
   try {
-    ensureDataDir();
+    await ensureDataDir();
     const obj = {};
     for (const [guildId, gmap] of explodedCounts.entries()) {
       obj[guildId] = Object.fromEntries(gmap);
     }
     const tmp = LB_FILE + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify(obj), "utf8");
-    fs.renameSync(tmp, LB_FILE);
+    await writeFile(tmp, JSON.stringify(obj), "utf8");
+    await rename(tmp, LB_FILE);
   } catch (e) {
-    console.error("Failed to save leaderboard:", e);
+    logger.error("Failed to save leaderboard:", e);
   }
 }
 
 function saveLeaderboardDebounced() {
   if (_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(() => {
-    saveLeaderboard();
+  _saveTimer = setTimeout(async () => {
+    await saveLeaderboard();
     _saveTimer = null;
   }, SAVE_DEBOUNCE_MS);
 }
 
 // ---- Spin Data Persistence ----
-function loadSpinData() {
+async function loadSpinData() {
   try {
-    ensureDataDir();
+    await ensureDataDir();
     if (!fs.existsSync(SPIN_FILE)) return;
-    const raw = fs.readFileSync(SPIN_FILE, "utf8");
+    const raw = await readFile(SPIN_FILE, "utf8");
     if (!raw) return;
     const parsed = JSON.parse(raw);
     for (const [guildId, data] of Object.entries(parsed)) {
       spinData.set(guildId, data);
     }
-    console.log("✅ Loaded spin data from", SPIN_FILE);
+    logger.info("✅ Loaded spin data from", SPIN_FILE);
   } catch (e) {
-    console.error("Failed to load spin data:", e);
+    logger.error("Failed to load spin data:", e);
   }
 }
 
-function saveSpinData() {
+async function saveSpinData() {
   try {
-    ensureDataDir();
+    await ensureDataDir();
     const obj = {};
     for (const [guildId, data] of spinData.entries()) {
       obj[guildId] = data;
     }
     const tmp = SPIN_FILE + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify(obj), "utf8");
-    fs.renameSync(tmp, SPIN_FILE);
+    await writeFile(tmp, JSON.stringify(obj), "utf8");
+    await rename(tmp, SPIN_FILE);
   } catch (e) {
-    console.error("Failed to save spin data:", e);
+    logger.error("Failed to save spin data:", e);
   }
 }
 
 function saveSpinDataDebounced() {
   if (_spinSaveTimer) clearTimeout(_spinSaveTimer);
-  _spinSaveTimer = setTimeout(() => {
-    saveSpinData();
+  _spinSaveTimer = setTimeout(async () => {
+    await saveSpinData();
     _spinSaveTimer = null;
   }, SAVE_DEBOUNCE_MS);
+}
+
+// ---- Scheduled Events Persistence ----
+async function loadScheduledEvents() {
+  try {
+    await ensureDataDir();
+    if (!fs.existsSync(SCHEDULED_FILE)) return;
+    const raw = await readFile(SCHEDULED_FILE, "utf8");
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    scheduledEvents.length = 0;
+    scheduledEvents.push(...parsed);
+    logger.info("Loaded scheduled events from", SCHEDULED_FILE);
+  } catch (e) {
+    logger.error("Failed to load scheduled events:", e);
+  }
+}
+
+async function saveScheduledEvents() {
+  try {
+    await ensureDataDir();
+    const tmp = SCHEDULED_FILE + ".tmp";
+    await writeFile(tmp, JSON.stringify(scheduledEvents), "utf8");
+    await rename(tmp, SCHEDULED_FILE);
+  } catch (e) {
+    logger.error("Failed to save scheduled events:", e);
+  }
+}
+
+function saveScheduledEventsDebounced() {
+  if (_scheduledSaveTimer) clearTimeout(_scheduledSaveTimer);
+  _scheduledSaveTimer = setTimeout(async () => {
+    await saveScheduledEvents();
+    _scheduledSaveTimer = null;
+  }, SAVE_DEBOUNCE_MS);
+}
+
+// Schedule an event to execute at a specific time
+function scheduleEvent(event) {
+  const id = `${event.type}_${event.guildId}_${event.userId}_${Date.now()}`;
+  const fullEvent = { ...event, id };
+  scheduledEvents.push(fullEvent);
+  saveScheduledEventsDebounced();
+  
+  // Set up the timer
+  const delay = fullEvent.executeAt - Date.now();
+  if (delay > 0) {
+    const timerId = setTimeout(() => executeScheduledEvent(fullEvent), delay);
+    _scheduledTimers.set(id, timerId);
+  } else {
+    // Execute immediately if the time has passed
+    executeScheduledEvent(fullEvent);
+  }
+  
+  return id;
+}
+
+// Cancel a scheduled event
+function cancelScheduledEvent(eventId) {
+  const timerId = _scheduledTimers.get(eventId);
+  if (timerId) {
+    clearTimeout(timerId);
+    _scheduledTimers.delete(eventId);
+  }
+  
+  const idx = scheduledEvents.findIndex(e => e.id === eventId);
+  if (idx !== -1) {
+    scheduledEvents.splice(idx, 1);
+    saveScheduledEventsDebounced();
+    return true;
+  }
+  return false;
+}
+
+// Execute a scheduled event
+async function executeScheduledEvent(event) {
+  try {
+    // Remove from timers
+    _scheduledTimers.delete(event.id);
+    
+    // Remove from scheduled events
+    const idx = scheduledEvents.findIndex(e => e.id === event.id);
+    if (idx !== -1) {
+      scheduledEvents.splice(idx, 1);
+      saveScheduledEventsDebounced();
+    }
+    
+    // Execute based on type
+    if (event.type === "remove_role") {
+      const guild = client.guilds.cache.get(event.guildId);
+      if (!guild) {
+        logger.warn(`Guild ${event.guildId} not found for scheduled event`);
+        return;
+      }
+      
+      try {
+        const member = await guild.members.fetch(event.userId);
+        const role = guild.roles.cache.get(event.roleId);
+        
+        if (member && role && member.roles.cache.has(event.roleId)) {
+          await member.roles.remove(role, event.reason || "Scheduled role removal");
+          logger.info(`Removed role ${role.name} from ${member.user.tag} (scheduled event)`);
+        }
+      } catch (err) {
+        logger.error(`Failed to execute scheduled role removal:`, err.message);
+      }
+    }
+  } catch (err) {
+    logger.error("Error executing scheduled event:", err);
+  }
+}
+
+// Restore scheduled events on startup
+function restoreScheduledEvents() {
+  const now = Date.now();
+  const eventsToProcess = [...scheduledEvents];
+  
+  for (const event of eventsToProcess) {
+    const delay = event.executeAt - now;
+    if (delay > 0) {
+      // Schedule for future execution
+      const timerId = setTimeout(() => executeScheduledEvent(event), delay);
+      _scheduledTimers.set(event.id, timerId);
+      logger.debug(`Restored scheduled event ${event.id} for ${new Date(event.executeAt).toISOString()}`);
+    } else {
+      // Execute immediately if past due
+      logger.info(`Executing past-due scheduled event ${event.id}`);
+      executeScheduledEvent(event);
+    }
+  }
 }
 
 // Helper: Get current month string (YYYY-MM)
@@ -399,24 +633,25 @@ function getGuildSpinData(guildId) {
   return guildData;
 }
 
-// load on startup
-loadLeaderboard();
-loadSpinData();
+// load on startup (using IIFE for async)
+(async () => {
+  await loadLeaderboard();
+  await loadSpinData();
+  await loadScheduledEvents();
+})();
 
 // save on graceful shutdown
-process.on("SIGINT", () => {
-  saveLeaderboard();
-  saveSpinData();
+process.on("SIGINT", async () => {
+  await saveLeaderboard();
+  await saveSpinData();
+  await saveScheduledEvents();
   process.exit();
 });
-process.on("SIGTERM", () => {
-  saveLeaderboard();
-  saveSpinData();
+process.on("SIGTERM", async () => {
+  await saveLeaderboard();
+  await saveSpinData();
+  await saveScheduledEvents();
   process.exit();
-});
-process.on("exit", () => {
-  saveLeaderboard();
-  saveSpinData();
 });
 
 // XP Helpers imported from utils.js
@@ -444,19 +679,22 @@ function recordExplosion(member) {
     try {
       saveLeaderboardDebounced();
     } catch (e) {
-      console.error("Save debounce failed:", e);
+      logger.error("Save debounce failed:", e);
     }
   } catch (e) {
-    console.error("Failed to record explosion:", e);
+    logger.error("Failed to record explosion:", e);
   }
 }
 client.once(Events.ClientReady, async () => {
-  console.log(`\n✅ Bot is online and ready!`);
-  console.log(`🤖 Logged in as ${client.user.tag}`);
-  console.log(`📊 Watching ${client.guilds.cache.size} server(s)`);
-  console.log(`🎲 Timeout chance: ${(CHANCE * 100).toFixed(0)}%`);
-  console.log(`⏱️  Timeout duration: ${TIMEOUT_MS / 1000}s`);
-  console.log(`⏳ Cooldown: ${COOLDOWN_MS / 1000}s\n`);
+  logger.info(`Bot is online and ready!`);
+  logger.info(`Logged in as ${client.user.tag}`);
+  logger.info(`Watching ${client.guilds.cache.size} server(s)`);
+  logger.info(`Timeout chance: ${(CHANCE * 100).toFixed(0)}%`);
+  logger.info(`Timeout duration: ${TIMEOUT_MS / 1000}s`);
+  logger.info(`Cooldown: ${COOLDOWN_MS / 1000}s`);
+
+  // Restore scheduled events from disk
+  restoreScheduledEvents();
 
   // Register slash commands
   const commands = [
@@ -580,13 +818,13 @@ client.once(Events.ClientReady, async () => {
   const rest = new REST({ version: "10" }).setToken(TOKEN);
 
   try {
-    console.log("Registering slash commands...");
+    logger.info("Registering slash commands...");
     await rest.put(Routes.applicationCommands(client.user.id), {
       body: commands,
     });
-    console.log("✅ Slash commands registered!");
+    logger.info("✅ Slash commands registered!");
   } catch (error) {
-    console.error("Error registering commands:", error);
+    logger.error("Error registering commands:", error);
   }
 });
 
@@ -651,25 +889,25 @@ client.on(Events.MessageCreate, async (message) => {
     const botMember = message.guild.members.me;
 
     // Debug logging
-    console.log(`\n🎯 Attempting timeout for ${member.user.tag}`);
-    console.log(
+    logger.debug(`🎯 Attempting timeout for ${member.user.tag}`);
+    logger.debug(
       `   Bot's highest role: ${botMember.roles.highest.name} (position: ${botMember.roles.highest.position})`,
     );
-    console.log(
+    logger.debug(
       `   Target's highest role: ${member.roles.highest.name} (position: ${member.roles.highest.position})`,
     );
-    console.log(
+    logger.debug(
       `   Bot has ModerateMembers: ${botMember.permissions.has(
         "ModerateMembers",
       )}`,
     );
-    console.log(
+    logger.debug(
       `   Bot has Administrator: ${botMember.permissions.has("Administrator")}`,
     );
-    console.log(`   Target is owner: ${member.guild.ownerId === member.id}`);
+    logger.debug(`Target is owner: ${member.guild.ownerId === member.id}`);
 
     if (!canTimeout(botMember, member)) {
-      console.log(`   ❌ Cannot timeout: insufficient permissions`);
+      logger.debug(`❌ Cannot timeout: insufficient permissions`);
       return;
     }
 
@@ -683,7 +921,7 @@ client.on(Events.MessageCreate, async (message) => {
     // Triple explosion chance for banned role
     if (member.roles.cache.has(ROLL_BANNED_ROLE)) {
       timeoutChance = Math.min(1, CHANCE * 3); // Triple chance, cap at 100%
-      console.log(
+      logger.debug(
         `   🎯 Banned role detected: tripled chance to ${(
           timeoutChance * 100
         ).toFixed(1)}%`,
@@ -698,7 +936,7 @@ client.on(Events.MessageCreate, async (message) => {
         )
       ) {
         timeoutChance = Math.max(timeoutChance, chance); // Use highest chance if multiple roles
-        console.log(
+        logger.debug(
           `   🎲 Higher chance detected (${roleIdentifier}): ${(
             chance * 100
           ).toFixed(1)}%`,
@@ -720,15 +958,15 @@ client.on(Events.MessageCreate, async (message) => {
       cooldowns.set(member.id, Date.now());
       // reply with ephemeral-ish fun message (public)
       await message.channel.send(`${member}, Boom! `);
-      console.log(
+      logger.debug(
         `Timed out ${member.user.tag} for ${durSeconds}s in ${message.guild.name}/${message.channel.name}`,
       );
     } catch (err) {
-      console.error("Failed to timeout member:", err.message);
+      logger.error("Failed to timeout member:", err.message);
       // Don't send error message in channel to avoid spam
     }
   } catch (err) {
-    console.error(err);
+    logger.error(err);
   }
 });
 
@@ -798,13 +1036,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const newLevel = getLevelFromXp(userData.xp);
     if (newLevel > userData.level) {
       userData.level = newLevel;
-      console.log(`[LEVEL UP] User ${userId} reached Level ${newLevel}`);
+      logger.debug(`[LEVEL UP] User ${userId} reached Level ${newLevel}`);
     }
     guildMap.set(userId, userData);
     try {
       saveLeaderboardDebounced();
     } catch (e) {
-      console.error("Save debounce failed:", e);
+      logger.error("Save debounce failed:", e);
     }
     try {
       const botMember = interaction.guild.members.me;
@@ -820,7 +1058,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       // Check cooldown for /roll command (server owner bypasses cooldown)
-      const userId = interaction.user.id;
       const isOwner = interaction.guild.ownerId === userId;
 
       // Block banned user from using /roll
@@ -861,7 +1098,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           );
 
           // Debug log
-          console.log(
+          logger.debug(
             `[ROLL COOLDOWN] User ${userId}: charges=${
               userData.charges
             }, timeSince=${Math.floor(
@@ -871,12 +1108,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
         } else {
           // New user starts with 1 charge
           availableCharges = 1;
-          console.log(
+          logger.debug(
             `[ROLL COOLDOWN] New user ${userId}: starting with ${availableCharges} charge`,
           );
         }
 
-        console.log(
+        logger.debug(
           `[ROLL COOLDOWN] User ${userId} attempting roll with ${availableCharges} charges available`,
         );
 
@@ -924,7 +1161,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       try {
         await interaction.guild.members.fetch();
       } catch (e) {
-        console.error("Failed to fetch guild members:", e);
+        logger.error("Failed to fetch guild members:", e);
       }
 
       // Get all non-bot members who aren't exempt
@@ -939,7 +1176,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         },
       );
 
-      console.log(
+      logger.debug(
         `[ROLL DEBUG] Total cached members: ${interaction.guild.members.cache.size}, Eligible: ${eligibleMembers.size}`,
       );
 
@@ -983,7 +1220,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             await interaction.followUp(
               `💥 Oops! ${commandUser} rolled a **1** and exploded themselves! 😂`,
             );
-            console.log(
+            logger.debug(
               `[ROLL] ${interaction.user.tag} rolled a 1 and exploded themselves`,
             );
           } else {
@@ -1007,7 +1244,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             await interaction.followUp(
               `💥💥 ${targetMember} got DOUBLE exploded (Not enough people for 2 timeouts)`,
             );
-            console.log(
+            logger.debug(
               `[ROLL] ${interaction.user.tag} rolled a 6 and exploded ${targetMember.user.tag}`,
             );
           } else {
@@ -1035,7 +1272,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             await interaction.followUp(
               `💥💥 DOUBLE KILL! ${firstMember} and ${secondMember} both got exploded!`,
             );
-            console.log(
+            logger.debug(
               `[ROLL] ${interaction.user.tag} rolled a 6 and exploded ${firstMember.user.tag} and ${secondMember.user.tag}`,
             );
           }
@@ -1052,7 +1289,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           );
           recordExplosion(targetMember);
           await interaction.followUp(`💥 ${targetMember} got exploded!`);
-          console.log(
+          logger.debug(
             `[ROLL] ${interaction.user.tag} rolled a ${diceRoll} and exploded ${targetMember.user.tag})`,
           );
         }
@@ -1070,22 +1307,24 @@ client.on(Events.InteractionCreate, async (interaction) => {
               await interaction.followUp(
                 `🌟✨💀 **ULTRA RARE EVENT!** 🌟✨💀\n${unluckyMember.user.tag} just hit the 1 IN A MILLION chance and got KICKED from the server! 😱`,
               );
-              console.log(
+              logger.debug(
                 `[ULTRA RARE] ${interaction.user.tag} triggered 1 in a million event - kicked ${unluckyMember.user.tag}`,
               );
 
               // Try to DM them the invite after kicking
-              try {
-                await unluckyMember.send(
-                  `You just hit the 1 IN A MILLION chance in ${interaction.guild.name}! 😱\nHere's the invite to rejoin: https://discord.gg/P8ZQZRjw29`,
-                );
-              } catch (dmErr) {
-                console.log(
-                  `Couldn't DM ${unluckyMember.user.tag} - they have DMs disabled or left mutual servers`,
-                );
+              if (REJOIN_INVITE_URL) {
+                try {
+                  await unluckyMember.send(
+                    `You just hit the 1 IN A MILLION chance in ${interaction.guild.name}! 😱\nHere's the invite to rejoin: ${REJOIN_INVITE_URL}`,
+                  );
+                } catch (dmErr) {
+                  logger.debug(
+                    `Couldn't DM ${unluckyMember.user.tag} - they have DMs disabled or left mutual servers`,
+                  );
+                }
               }
             } catch (err) {
-              console.error(
+              logger.error(
                 `Failed to kick ${unluckyMember.user.tag}:`,
                 err.message,
               );
@@ -1118,7 +1357,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
               recordExplosion(member);
               timeoutCount++;
             } catch (err) {
-              console.error(
+              logger.error(
                 `Failed to timeout ${member.user.tag}:`,
                 err.message,
               );
@@ -1130,14 +1369,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
           }
         }
       } catch (err) {
-        console.error("Failed to timeout member from /roll:", err.message);
+        logger.error("Failed to timeout member from /roll:", err.message);
         await interaction.followUp({
           content: `⚠️ Couldn't explode them`,
           flags: MessageFlags.Ephemeral,
         });
       }
     } catch (err) {
-      console.error("Error in /roll command:", err);
+      logger.error("Error in /roll command:", err);
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({
@@ -1151,7 +1390,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
         }
       } catch (e) {
-        console.error("Failed to send error message:", e);
+        logger.error("Failed to send error message:", e);
       }
     }
   } else if (interaction.commandName === "rollcd") {
@@ -1173,7 +1412,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       const enabled = interaction.options.getBoolean("enabled");
       rollCooldownEnabled = enabled;
-      console.log(`rollCooldownEnabled set to: ${enabled}`);
+      logger.info(`rollCooldownEnabled set to: ${enabled}`);
 
       await interaction.editReply({
         content: `/roll cooldown is now **${
@@ -1182,7 +1421,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         flags: MessageFlags.Ephemeral,
       });
     } catch (err) {
-      console.error("Error in /rollcd command (top-level):", err);
+      logger.error("Error in /rollcd command (top-level):", err);
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({
@@ -1196,7 +1435,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
         }
       } catch (e) {
-        console.error("Failed to send error message:", e);
+        logger.error("Failed to send error message:", e);
       }
     }
   } else if (interaction.commandName === "lb") {
@@ -1204,93 +1443,29 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await interaction.deferReply();
       const page = interaction.options.getInteger("page") ?? 1;
       const lbType = interaction.options.getString("type") ?? "xp";
-      const perPage = 10;
-
-      // Use guild-specific leaderboard
       const guildId = interaction.guild.id;
-      const guildMap = explodedCounts.get(guildId) ?? new Map();
-      const entries = Array.from(guildMap.entries());
 
-      // Sort based on type
-      if (lbType === "explosions") {
-        entries.sort((a, b) => b[1].explosions - a[1].explosions);
-      } else {
-        entries.sort((a, b) => b[1].xp - a[1].xp);
-      }
+      const result = await buildLeaderboardEmbed(
+        interaction.guild,
+        guildId,
+        page,
+        lbType,
+        interaction.user.id,
+      );
 
-      if (entries.length === 0) {
+      if (result.empty) {
         await interaction.editReply({
           content: "No explosions recorded in this server yet.",
         });
         return;
       }
 
-      const totalPages = Math.ceil(entries.length / perPage);
-      const currentPage = Math.max(1, Math.min(page, totalPages));
-      const startIdx = (currentPage - 1) * perPage;
-      const slice = entries.slice(startIdx, startIdx + perPage);
-
-      // Build leaderboard lines
-      const lines = [];
-      for (let i = 0; i < slice.length; i++) {
-        const [id, userData] = slice[i];
-        const rank = startIdx + i + 1;
-        let display = `User ${id.slice(-4)}`;
-        try {
-          const member = await interaction.guild.members.fetch(id);
-          display = member.displayName;
-        } catch (e) {
-          // keep fallback
-        }
-        if (lbType === "explosions") {
-          lines.push(
-            `**${rank}.** ${display} • 💥 ${userData.explosions.toLocaleString()}`,
-          );
-        } else {
-          lines.push(
-            `**${rank}.** ${display} • **Level ${userData.level}** (${userData.xp.toLocaleString()} XP)`,
-          );
-        }
-      }
-
-      // Find user's rank
-      const userRank = entries.findIndex(([id]) => id === interaction.user.id);
-      const userRankText =
-        userRank >= 0 ? `Your rank: #${userRank + 1}` : "You have no data yet";
-
-      // Create embed
-      const title =
-        lbType === "explosions"
-          ? "💥 Explosions Leaderboard"
-          : "⭐ XP Leaderboard";
-      const embed = new EmbedBuilder()
-        .setTitle(title)
-        .setDescription(lines.join("\n"))
-        .setColor(0x2b2d31)
-        .setFooter({
-          text: `Page ${currentPage}/${totalPages} • ${userRankText}`,
-        });
-
-      // Create pagination buttons (include type in customId)
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`lb_prev_${guildId}_${currentPage}_${lbType}`)
-          .setLabel("Previous Page")
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(currentPage <= 1),
-        new ButtonBuilder()
-          .setCustomId(`lb_next_${guildId}_${currentPage}_${lbType}`)
-          .setLabel("Next Page")
-          .setStyle(ButtonStyle.Primary)
-          .setDisabled(currentPage >= totalPages),
-      );
-
       await interaction.editReply({
-        embeds: [embed],
-        components: [row],
+        embeds: [result.embed],
+        components: [result.row],
       });
     } catch (err) {
-      console.error("Error in /lb command:", err);
+      logger.error("Error in /lb command:", err);
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({
@@ -1304,7 +1479,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
         }
       } catch (e) {
-        console.error("Failed to send error for /lb:", e);
+        logger.error("Failed to send error for /lb:", e);
       }
     }
   } else if (interaction.commandName === "spin") {
@@ -1374,7 +1549,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
               permissions: ["Administrator"],
               reason: "Spin wheel winner role",
             });
-            console.log(
+            logger.debug(
               `[SPIN] Created "${SPIN_ADMIN_ROLE_NAME}" role in ${interaction.guild.name}`,
             );
           }
@@ -1385,29 +1560,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
             "Won the spin wheel for 1 week",
           );
 
-          // Schedule role removal after 1 week
-          setTimeout(async () => {
-            try {
-              const member = await interaction.guild.members.fetch(userId);
-              if (member.roles.cache.has(spinRole.id)) {
-                await member.roles.remove(
-                  spinRole,
-                  "Spin wheel admin period expired (1 week)",
-                );
-                console.log(
-                  `[SPIN] Removed admin role from ${member.user.tag} after 1 week`,
-                );
-              }
-            } catch (e) {
-              console.error("[SPIN] Failed to remove role after timeout:", e);
-            }
-          }, ONE_WEEK_MS);
+          // Schedule role removal after 1 week (persisted)
+          scheduleEvent({
+            type: "remove_role",
+            guildId: interaction.guild.id,
+            userId: userId,
+            roleId: spinRole.id,
+            executeAt: Date.now() + ONE_WEEK_MS,
+            reason: "Spin wheel admin period expired (1 week)",
+          });
 
           // Create double-or-nothing button
           const sessionKey = `${guildId}-${userId}`;
           activeSpinSessions.set(sessionKey, {
-            expires: Date.now() + 60000, // 1 minute to decide
+            expires: Date.now() + SPIN_DECISION_TIMEOUT_MS,
             stage: 1,
+            roleId: spinRole.id, // Store role ID for potential cancellation
           });
 
           const row = new ActionRowBuilder().addComponents(
@@ -1442,9 +1610,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
             }
           }, 60000);
 
-          console.log(`[SPIN] ${interaction.user.tag} WON - gave 1 week admin`);
+          logger.debug(`[SPIN] ${interaction.user.tag} WON - gave 1 week admin`);
         } catch (err) {
-          console.error("[SPIN] Error giving admin role:", err);
+          logger.error("[SPIN] Error giving admin role:", err);
           await interaction.editReply({
             content: `🎉 You won! But I couldn't give you the admin role (missing permissions?).`,
           });
@@ -1459,16 +1627,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.editReply({
             content: `💀 **LOST!** 💀\n\n${interaction.user} spun the wheel and lost! Enjoy your **1 week timeout**! 😈`,
           });
-          console.log(`[SPIN] ${interaction.user.tag} LOST - 1 week timeout`);
+          logger.debug(`[SPIN] ${interaction.user.tag} LOST - 1 week timeout`);
         } catch (err) {
-          console.error("[SPIN] Error applying timeout:", err);
+          logger.error("[SPIN] Error applying timeout:", err);
           await interaction.editReply({
             content: `💀 You lost! But I couldn't timeout you (you might be immune).`,
           });
         }
       }
     } catch (err) {
-      console.error("Error in /spin command:", err);
+      logger.error("Error in /spin command:", err);
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({
@@ -1482,7 +1650,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
         }
       } catch (e) {
-        console.error("Failed to send error for /spin:", e);
+        logger.error("Failed to send error for /spin:", e);
       }
     }
   } else if (interaction.commandName === "blackjack") {
@@ -1697,7 +1865,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
       }, 300000); // 5 minutes
     } catch (err) {
-      console.error("Error in /blackjack command:", err);
+      logger.error("Error in /blackjack command:", err);
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({
@@ -1711,7 +1879,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
         }
       } catch (e) {
-        console.error("Failed to send error for /blackjack:", e);
+        logger.error("Failed to send error for /blackjack:", e);
       }
     }
   } else if (interaction.commandName === "xp") {
@@ -1815,7 +1983,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       await interaction.reply({ embeds: [embed] });
     } catch (err) {
-      console.error("Error in /xp:", err);
+      logger.error("Error in /xp:", err);
       if (!interaction.replied)
         await interaction.reply({
           content: "An error occurred.",
@@ -1961,6 +2129,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
               won = true;
               multiplier = 35;
             }
+          } else {
+            // Invalid betting space - refund bet and notify user
+            await interaction.editReply({
+              content: `❌ Invalid betting space: "${bettingSpace}". Valid options: red, black, even, odd, 1-18, 19-36, 1-12, 13-24, 25-36, 0, or any number 1-36.`,
+            });
+            return;
           }
           break;
       }
@@ -2031,7 +2205,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       saveLeaderboardDebounced();
     } catch (err) {
-      console.error("Error in /roulette:", err);
+      logger.error("Error in /roulette:", err);
       if (!interaction.replied && !interaction.deferred) {
         await interaction.reply({
           content: "An error occurred.",
@@ -2064,85 +2238,31 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const lbType = parts[4] || "xp"; // Get type from button, default to xp
 
       const newPage = direction === "next" ? currentPage + 1 : currentPage - 1;
-      const perPage = 10;
 
-      // Get leaderboard data
-      const guildMap = explodedCounts.get(guildId) ?? new Map();
-      const entries = Array.from(guildMap.entries());
-
-      // Sort based on type
-      if (lbType === "explosions") {
-        entries.sort((a, b) => b[1].explosions - a[1].explosions);
-      } else {
-        entries.sort((a, b) => b[1].xp - a[1].xp);
-      }
-
-      const totalPages = Math.ceil(entries.length / perPage);
-      const validPage = Math.max(1, Math.min(newPage, totalPages));
-      const startIdx = (validPage - 1) * perPage;
-      const slice = entries.slice(startIdx, startIdx + perPage);
-
-      // Build leaderboard lines
-      const lines = [];
-      for (let i = 0; i < slice.length; i++) {
-        const [id, userData] = slice[i];
-        const rank = startIdx + i + 1;
-        let display = `User ${id.slice(-4)}`;
-        try {
-          const member = await interaction.guild.members.fetch(id);
-          display = member.displayName;
-        } catch (e) {
-          // keep fallback
-        }
-        if (lbType === "explosions") {
-          lines.push(
-            `**${rank}.** ${display} • 💥 ${userData.explosions.toLocaleString()}`,
-          );
-        } else {
-          lines.push(
-            `**${rank}.** ${display} • **Level ${userData.level}** (${userData.xp.toLocaleString()} XP)`,
-          );
-        }
-      }
-
-      // Find user's rank
-      const userRank = entries.findIndex(([id]) => id === interaction.user.id);
-      const userRankText =
-        userRank >= 0 ? `Your rank: #${userRank + 1}` : "You have no data yet";
-
-      // Create embed
-      const title =
-        lbType === "explosions"
-          ? "💥 Explosions Leaderboard"
-          : "⭐ XP Leaderboard";
-      const embed = new EmbedBuilder()
-        .setTitle(title)
-        .setDescription(lines.join("\n"))
-        .setColor(0x2b2d31)
-        .setFooter({
-          text: `Page ${validPage}/${totalPages} • ${userRankText}`,
-        });
-
-      // Create pagination buttons (include type)
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`lb_prev_${guildId}_${validPage}_${lbType}`)
-          .setLabel("Previous Page")
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(validPage <= 1),
-        new ButtonBuilder()
-          .setCustomId(`lb_next_${guildId}_${validPage}_${lbType}`)
-          .setLabel("Next Page")
-          .setStyle(ButtonStyle.Primary)
-          .setDisabled(validPage >= totalPages),
+      const result = await buildLeaderboardEmbed(
+        interaction.guild,
+        guildId,
+        newPage,
+        lbType,
+        interaction.user.id,
       );
 
+      if (result.empty) {
+        // Should not happen on pagination, but handle gracefully
+        await interaction.update({
+          content: "No data available.",
+          embeds: [],
+          components: [],
+        });
+        return;
+      }
+
       await interaction.update({
-        embeds: [embed],
-        components: [row],
+        embeds: [result.embed],
+        components: [result.row],
       });
     } catch (err) {
-      console.error("Error handling leaderboard pagination:", err);
+      logger.error("Error handling leaderboard pagination:", err);
     }
     return;
   }
@@ -2284,9 +2404,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
     } catch (err) {
       // Don't log "Unknown interaction" errors as they're expected when tokens expire
       if (err.code !== 10062) {
-        console.error("Error handling blackjack buttons:", err);
+        logger.error("Error handling blackjack buttons:", err);
       } else {
-        console.log(
+        logger.debug(
           `Blackjack interaction expired for user ${interaction.user?.tag || "unknown"}`,
         );
       }
@@ -2333,7 +2453,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         content: `🎉 **WINNER!** 🎉\n\n${interaction.user} chose to keep their **1 week of Admin**! Smart choice! 🧠`,
         components: [],
       });
-      console.log(`[SPIN] ${interaction.user.tag} chose to keep 1 week admin`);
+      logger.debug(`[SPIN] ${interaction.user.tag} chose to keep 1 week admin`);
     } else if (action === "double") {
       // User chose double or nothing - 50/50 again!
       await interaction.update({
@@ -2341,7 +2461,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         components: [],
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await new Promise((resolve) => setTimeout(resolve, DOUBLE_OR_NOTHING_DELAY_MS));
 
       const doubleWon = Math.random() < 0.5;
 
@@ -2354,37 +2474,36 @@ client.on(Events.InteractionCreate, async (interaction) => {
           );
 
           if (spinRole) {
-            // Cancel the 1-week removal and schedule 2-week removal instead
-            setTimeout(async () => {
-              try {
-                const member =
-                  await interaction.guild.members.fetch(targetUserId);
-                if (member.roles.cache.has(spinRole.id)) {
-                  await member.roles.remove(
-                    spinRole,
-                    "Spin wheel admin period expired (2 weeks)",
-                  );
-                  console.log(
-                    `[SPIN] Removed admin role from ${member.user.tag} after 2 weeks`,
-                  );
-                }
-              } catch (e) {
-                console.error(
-                  "[SPIN] Failed to remove role after 2-week timeout:",
-                  e,
-                );
-              }
-            }, TWO_WEEKS_MS);
+            // Cancel any existing 1-week scheduled removal for this user/role
+            const existingEvent = scheduledEvents.find(
+              e => e.type === "remove_role" && 
+                   e.guildId === guildId && 
+                   e.userId === targetUserId && 
+                   e.roleId === spinRole.id
+            );
+            if (existingEvent) {
+              cancelScheduledEvent(existingEvent.id);
+            }
+
+            // Schedule 2-week removal instead
+            scheduleEvent({
+              type: "remove_role",
+              guildId: guildId,
+              userId: targetUserId,
+              roleId: spinRole.id,
+              executeAt: Date.now() + TWO_WEEKS_MS,
+              reason: "Spin wheel admin period expired (2 weeks)",
+            });
           }
 
           await interaction.editReply({
             content: `🎉🎉 **JACKPOT!** 🎉🎉\n\n${interaction.user} went double or nothing and **WON**! They now have **2 WEEKS of Admin**! 🏆`,
           });
-          console.log(
+          logger.debug(
             `[SPIN] ${interaction.user.tag} WON double or nothing - 2 weeks admin`,
           );
         } catch (err) {
-          console.error("[SPIN] Error extending admin:", err);
+          logger.error("[SPIN] Error extending admin:", err);
         }
       } else {
         // Lost double - remove admin and apply 2 week timeout
@@ -2393,11 +2512,24 @@ client.on(Events.InteractionCreate, async (interaction) => {
             (r) => r.name === SPIN_ADMIN_ROLE_NAME,
           );
 
-          if (spinRole && interaction.member.roles.cache.has(spinRole.id)) {
-            await interaction.member.roles.remove(
-              spinRole,
-              "Lost double or nothing",
+          if (spinRole) {
+            // Cancel any existing scheduled removal since we're removing the role now
+            const existingEvent = scheduledEvents.find(
+              e => e.type === "remove_role" && 
+                   e.guildId === guildId && 
+                   e.userId === targetUserId && 
+                   e.roleId === spinRole.id
             );
+            if (existingEvent) {
+              cancelScheduledEvent(existingEvent.id);
+            }
+
+            if (interaction.member.roles.cache.has(spinRole.id)) {
+              await interaction.member.roles.remove(
+                spinRole,
+                "Lost double or nothing",
+              );
+            }
           }
 
           await interaction.member.timeout(
@@ -2408,11 +2540,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.editReply({
             content: `💀💀 **BUSTED!** 💀💀\n\n${interaction.user} went double or nothing and **LOST EVERYTHING**! Enjoy your **2 WEEKS TIMEOUT**! 😈😈`,
           });
-          console.log(
+          logger.debug(
             `[SPIN] ${interaction.user.tag} LOST double or nothing - 2 weeks timeout`,
           );
         } catch (err) {
-          console.error("[SPIN] Error applying double loss:", err);
+          logger.error("[SPIN] Error applying double loss:", err);
           await interaction.editReply({
             content: `💀 You lost double or nothing! But I couldn't timeout you (you might be immune).`,
           });
